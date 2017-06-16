@@ -20,6 +20,10 @@ import sinn.models as models
 
 logger = logging.getLogger("fsgif_model")
 
+# HACK
+shim.cf.inf = 1e12
+    # Actual infinity doesn't play nice in kernels, because inf*0 is undefined
+
 class Kernel_ε(models.ModelKernelMixin, kernels.ExpKernel):
     @staticmethod
     def get_kernel_params(model_params):
@@ -165,23 +169,38 @@ class GIF_spiking(models.Model):
         self.t_hat.add_inputs([self.s, self.t_hat])
 
         # Pad to allow convolution
-        memory_time = max(memory_time,
+        # FIXME Check with GIF_mean_field to see if memory_time could be better / more consistently treated
+        if memory_time is None:
+            memory_time = 0
+        self.memory_time = max(memory_time,
                           max( kernel.memory_time
                                for kernel in [self.ε, self.θ1, self.θ2] ) )
-        self.s.pad(memory_time)
+        self.s.pad(self.memory_time)
         # Pad because these are ODEs (need initial condition)
         self.u.pad(1)
         self.t_hat.pad(1)
 
-
         # Expand the parameters to treat them as neural parameters
         # Original population parameters are kept as a copy
         # self.pop_params = copy.copy(self.params)
-        ExpandedParams = namedtuple('ExpandedParams', ['u_rest', 't_ref'])
+        ExpandedParams = namedtuple('ExpandedParams', ['u_rest', 't_ref', 'u_r'])
         self.expanded_params = ExpandedParams(
             u_rest = self.expand_param(self.params.u_rest, self.params.N),
             t_ref = self.expand_param(self.params.t_ref, self.params.N),
+            u_r = self.expand_param(self.params.u_r, self.params.N)
         )
+
+        # Initialize last spike time such that it was effectively "at infinity"
+        idx = self.t_hat.t0idx - 1; assert(idx >= 0)
+        data = self.t_hat._data.get_value(borrow=True)
+        data[idx, :] = np.ones(self.t_hat.shape) * self.memory_time * self.t_hat.dt
+        self.t_hat._data.set_value(data, borrow=True)
+
+        # Initialize membrane potential to u_rest
+        idx = self.u.t0idx - 1; assert(idx >= 0)
+        data = self.t_hat._data.get_value(borrow=True)
+        data[idx, :] = self.expanded_params.u_rest
+        self.u._data.set_value(data, borrow=True)
 
         # self.params = Parameters(
         #     N = self.params.N,
@@ -193,7 +212,7 @@ class GIF_spiking(models.Model):
         #     u_th = self.expand_param(self.params.u_th),
         #     u_r = self.expand_param(self.params.u_r),
         #     c = self.expand_param(self.params.c),
-        #     Δu = 
+        #     Δu =
 
 
     @staticmethod
@@ -277,9 +296,8 @@ class GIF_spiking(models.Model):
 
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
-        return ( pop_rmul( self.s.pop_slices,
-                           self.params.τ_m,
-                           self.s.convolve(self.ε, t) ) )
+        return ( self.s.pop_rmul( self.params.τ_m,
+                                  self.s.convolve(self.ε, t) ) )
             # s includes the connection weights w, and convolution also includes
             # the sums over j and β in Eq. 20.
             # Need to fix spiketrain convolution before we can use the exponential
@@ -303,39 +321,36 @@ class GIF_spiking(models.Model):
             # Take care using this on another history than u – it may be padded
         # Euler approximation for the integral of the differential equation
         # 'm1' stands for 'minus 1', so it's the previous time bin
-        return shim.switch( self.t_hat[t_that] < self.expanded_params.t_ref,
-                            pop_mul( self.s.pop_slices,
-                                     self.u[tidx_u_m1],
-                                     (1 - self.u.dt/self.params.τ_m) )
-                            + pop_radd( self.s.pop_slices,
-                                        self.params.u_rest + self.params.R * self.I_ext[t_Iext],
-                                        self.RI_syn[t_RIsyn] ),
-                            self.expanded_params.u_rest )
+        red_factor = shim.exp(-self.u.dt/self.params.τ_m)
+        return shim.switch( shim.ge(self.t_hat[t_that], self.expanded_params.t_ref),
+                            self.s.pop_mul( self.u[tidx_u_m1],
+                                            red_factor )
+                            + self.s.pop_mul( self.s.pop_radd( (self.params.u_rest + self.params.R * self.I_ext[t_Iext]) ,
+                                                               self.RI_syn[t_RIsyn] ),
+                                              (1 - red_factor) ),
+                            self.expanded_params.u_r )
 
     def varθ_fn(self, t):
         """Dynamic threshold. Eq. (22)."""
-        return pop_radd(self.s.pop_slices,
-                        self.params.u_th,
-                        self.θ1.convolve(self.s, t) + self.s.convolve(self.θ2, t))
+        if t > 1:
+            sinn.flag = True
+        return self.s.pop_radd(self.params.u_th,
+                               self.s.convolve(self.θ1, t) + self.s.convolve(self.θ2, t))
             # Need to fix spiketrain convolution before we can use the exponential
             # optimization. (see fixme comments in histories.spiketrain._convolve_single_t
             # and kernels.ExpKernel._convolve_single_t)
 
     def λ_fn(self, t):
         """Hazard rate. Eq. (23)."""
-        return shim.clip(
-            pop_rmul(self.s.pop_slices,
-                     self.params.c,
-                     shim.exp( pop_div( self.s.pop_slices,
-                                        ( self.u[t] - self.varθ[t] ),
-                                        self.params.Δu ) ) ),
-            0, 1)
+        return self.s.pop_rmul(self.params.c,
+                               shim.exp( self.s.pop_div( ( self.u[t] - self.varθ[t] ),
+                                                       self.params.Δu ) ) )
 
     def s_fn(self, t):
         """Spike generation"""
         return ( self.rndstream.binomial( size = self.s.shape,
                                           n = 1,
-                                          p = self.λ[t] )
+                                          p = sinn.clip_probabilities(self.λ[t]*self.s.dt) )
                  .nonzero()[0] )
             # nonzero returns a tuple, with one element per axis
 
@@ -386,7 +401,7 @@ def pop_rmul(pop_slices, multiplier, neuron_term):
 def pop_div(pop_slices, neuron_term, divisor):
     if not shim.is_theano_object(neuron_term, divisor):
         assert(len(pop_slices) == len(divisor))
-        return shim.concatenate( [ neuron_term[pop_slice] * div_el
+        return shim.concatenate( [ neuron_term[pop_slice] / div_el
                                    for pop_slice, div_el in zip(pop_slices, divisor)],
                                  axis = 0)
     else:
@@ -405,7 +420,7 @@ class GIF_mean_field(models.Model):
         self.I_ext = input_history
         self.rndstream = random_stream
         if not isinstance(self.A, Series):
-            raise ValueError("Spike history must be an instance of sinn.Series.")
+            raise ValueError("Activity history must be an instance of sinn.Series.")
         if not isinstance(self.I_ext, Series):
             raise ValueError("External input history must be an instance of sinn.Series.")
         # This runs consistency tests on the parameters
@@ -607,13 +622,13 @@ class GIF_mean_field(models.Model):
         self.W.add_inputs([self.P_λ, self.m])
         self.nbar.add_inputs([self.W, self.Pfree, self.x, self.P_Λ, self.X])
 
-        if self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A):
+        if self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1:
             self.given_A()
 
     def given_A(self):
         """Run this function when A is given data. It changes reverses the dependency
         n -> A to A -> n and fills the n array"""
-        assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A))
+        assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1)
         self.n.clear_inputs()
         # TODO: use op
         self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
@@ -705,10 +720,22 @@ class GIF_mean_field(models.Model):
         # self.m._data.set_value(mdata, borrow=True)
 
         # Make all neurons free neurons
-        xdata = self.x._data.get_value(borrow=True)
-        xdata[0] = self.params.N
-        self.x._data.set_value(xdata, borrow=True)
+        idx = self.x.t0idx - 1; assert(idx >= 0)
+        data = self.x._data.get_value(borrow=True)
+        data[idx,:] = self.params.N
+        self.x._data.set_value(data, borrow=True)
 
+        # Set refractory membrane potential to u_rest
+        idx = self.u.t0idx - 1; assert(idx >= 0)
+        data = self.u._data.get_value(borrow=True)
+        data[idx,:] = self.params.u_rest
+        self.u._data.set_value(data, borrow=True)
+
+        # Set free membrane potential to u_rest
+        idx = self.h.t0idx - 1; assert(idx >= 0)
+        data = self.h._data.get_value(borrow=True)
+        data[idx,:] = self.params.u_rest
+        self.h._data.set_value(data, borrow=True)
 
         #self.g_l.set_value( np.zeros((self.Npops, self.Nθ)) )
         #self.y.set_value( np.zeros((self.Npops, self.Npops)) )
@@ -744,8 +771,8 @@ class GIF_mean_field(models.Model):
             axis=-2)
 
     def h_tot_fn(self, t):
-        """p.92, line 10, or Eq. 94, p. 48
-        Note that the pseudocode on p. 92 includes the u_rest term, whereas in Eq. 94
+        """p.52, line 10, or Eq. 94, p. 48
+        Note that the pseudocode on p. 52 includes the u_rest term, whereas in Eq. 94
         this term is instead included in the equation for h (Eq. 92). We follow the pseudocode here.
         """
         # FIXME: I'm pretty sure some time indices are wrong (should be ±1)
@@ -757,8 +784,8 @@ class GIF_mean_field(models.Model):
         return ( self.params.u_rest + self.params.R*self.I_ext[t] * (1 - red_factor_τm)
                  + ( self.params.τ_m * (self.params.p * self.params.w) * self.params.N
                        * (self.A_Δ[t]
-                          + ( ( self.params.τ_s * red_factor_τs * ( self.y[tidx_y-1] - self.A_Δ[t] )
-                                - red_factor_τm * (self.params.τ_s * self.y[tidx_y-1] - self.params.τ_m * self.A_Δ[t]) )
+                          + ( ( self.params.τ_s * red_factor_τs * ( self.y[tidx_y] - self.A_Δ[t] )
+                                - red_factor_τm * (self.params.τ_s * self.y[tidx_y] - self.params.τ_m * self.A_Δ[t]) )
                               / (self.params.τ_s - self.params.τ_m) ) )
                    ).sum(axis=-1) )
 
@@ -782,7 +809,7 @@ class GIF_mean_field(models.Model):
                 ).flatten()
 
     def varθfree_fn(self, t):
-        """p.53, line 6 and p. 45 Eq. 77a"""
+        """p. 53, line 6 and p. 45 Eq. 77a"""
         #tidx_varθ = self.varθ.get_t_idx(t)
         # TODO: cache reduction factor
         red_factor = (self.params.J_θ * shim.exp(-self.memory_time/self.params.τ_θ)).flatten()
