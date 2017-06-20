@@ -34,6 +34,11 @@ import sinn.analyze.sweep as sweep
 import fsgif_model as gif
 ############################
 
+############################
+# Basic configuration
+# Sets logger, default filename and whether to use Theano
+############################
+
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 if __name__ == "__main__":
@@ -48,6 +53,13 @@ if __name__ == "__main__":
     logger.addHandler(ch)
 
 _BASENAME = "fsgif"
+
+def load_theano():
+    """
+    Run this function to use Theano for computations.
+    Currently this is not supported for data generation.
+    """
+    shim.load_theano()
 
 ################################
 # Model creation
@@ -559,11 +571,16 @@ try:
 except ImportError:
     pass
 else:
+    ####
     # Root level cli entry point
     @click.group()
-    def cli():
-        pass
+    @click.option('--theano/--no-theano', default=False)
+    def cli(theano):
+        if theano:
+            load_theano()
 
+    ####
+    # Data generation commands
     @click.group()
     def generate():
         pass
@@ -574,7 +591,7 @@ else:
     @click.command()
     @click.option('--datalen', type=float)
     @click.option('--filename', default="")
-    @click.option('--save/--nosave', default=True)
+    @click.option('--save/--no-save', default=True)
     def spikes(datalen, filename, save):
         return generate_spikes(datalen, filename, save)
 
@@ -588,3 +605,52 @@ else:
 
     generate.add_command(spikes)
     generate.add_command(activity)
+
+    ####
+    # Computation commands
+    @click.group()
+    def compute():
+        pass
+
+    @click.command()
+    @click.argument('param1')
+    @click.argument('param2')
+    @click.option('--output', default="")
+    @click.option('--fineness', default=1)
+    @click.option('--recalculate/--use-saved', default=False)
+    @click.option('--ipp_url_file', default="")
+    @click.option('--ipp_profile', default="")
+    def loglikelihood(param1, param2, fineness,
+                      output,
+                      recalculate,
+                      ipp_url_file, ipp_profile):
+        output = output if output is not "" else None
+        ipp_url_file = ipp_url_file if ipp_url_file is not "" else None
+        ipp_profile = ipp_profile if ipp_profile is not "" else None
+
+        return likelihood_sweep(param1, param2, fineness,
+                                mean_field_model = None,
+                                output_filename = output,
+                                recalculate = recalculate,
+                                ipp_url_file = ipp_url_file,
+                                ipp_profile = ipp_profile)
+
+    compute.add_command(loglikelihood)
+
+    ####
+    # Plotting commands
+    @click.group()
+    def plot():
+        pass
+
+    # TODO: Allow more options for plotting likelihood
+    @click.command()
+    @click.option('--input', default="")
+    def likelihood(input):
+        if input == "":
+            input = None
+        return plot_likelihood(loglikelihood_filename = input,
+                               ellipse = None,
+                               true_params = None)
+
+    plot.add_command(likelihood)

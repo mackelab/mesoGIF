@@ -68,7 +68,7 @@ class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
     @staticmethod
     def get_kernel_params(model_params):
         if model_params.t_ref.ndim == 1:
-            t_offset = np.array(model_params.t_ref)[np.newaxis,:]
+            t_offset = model_params.t_ref[np.newaxis,:]
         else:
             t_offset = model_params.t_ref
         return kernels.ExpKernel.Parameters(
@@ -193,7 +193,7 @@ class GIF_spiking(models.Model):
         # Initialize last spike time such that it was effectively "at infinity"
         idx = self.t_hat.t0idx - 1; assert(idx >= 0)
         data = self.t_hat._data.get_value(borrow=True)
-        data[idx, :] = np.ones(self.t_hat.shape) * self.memory_time * self.t_hat.dt
+        data[idx, :] = shim.ones(self.t_hat.shape) * self.memory_time * self.t_hat.dt
         self.t_hat._data.set_value(data, borrow=True)
 
         # Initialize membrane potential to u_rest
@@ -512,19 +512,6 @@ class GIF_mean_field(models.Model):
         # self.θhat                                                       # convolution of θtilde with n up to t_n (for t_n > t - self.K)
 
 
-        # Create the refractory mask
-        # This mask is zero for time bins within the refractory period,
-        # such that it can be multiplied element-wise with arrays of length K
-        self.ref_mask = np.ones(self.u.shape)
-        for l in range(self.ref_mask.shape[0]):
-            # Loop over lags. l=0 corresponds to t-Δt, l=1 to t-2Δt, etc.
-            for α in range(self.ref_mask.shape[1]):
-                # Loop over populations α
-                if (l+1)*self.dt < self.params.t_ref[α]:
-                    self.ref_mask[l, α] = 0
-                else:
-                    break
-
         #####################################################
         # Create the loglikelihood function
         # TODO: Use op and write as `self.nbar / self.params.N`
@@ -592,33 +579,44 @@ class GIF_mean_field(models.Model):
         self.W.set_update_function(self.W_fn)
         self.nbar.set_update_function(self.nbar_fn)
 
+
+        # HACK: At present, sinn dependencies don't support lagged
+        #       inputs (all inputs are assumed to need the same time point t),
+        #       so only inputs at the same time point are specified.
         self.A.add_inputs([self.n])
         self.n.add_inputs([self.nbar])
         self.h.add_inputs([self.h, self.h_tot])
+        #self.h.add_inputs([self.h_tot])
         self.h_tot.add_inputs([self.I_ext, self.A_Δ, self.y])
         self.u.add_inputs([self.u, self.h_tot])
+        #self.u.add_inputs([self.h_tot])
         self.varθ.add_inputs([self.varθfree, self.n, self.θtilde_dis])
-        #self.λ.add_inputs([self.λtilde])
+        #self.varθ.add_inputs([self.varθfree, self.θtilde_dis])
         self.λ.add_inputs([self.u, self.varθ])
         self.A_Δ.add_inputs([self.A])
         self.g.add_inputs([self.g, self.n])
+        #self.g.add_inputs([])
         self.x.add_inputs([self.Pfree, self.x, self.m])
+        #self.x.add_inputs([])
         self.y.add_inputs([self.y, self.A_Δ])
+        #self.y.add_inputs([self.A_Δ])
         self.z.add_inputs([self.Pfree, self.z, self.x, self.v])
+        #self.z.add_inputs([self.Pfree])
         self.varθfree.add_inputs([self.g])
-        #self.λtildefree.add_inputs([self.h, self.varθfree])
         self.λfree.add_inputs([self.h, self.varθfree])
-        #self.λfree.add_inputs([self.λtildefree])
-        #self.λtilde.add_inputs([self.u, self.varθ])
-        self.Pfree.add_inputs([self.λfree, self.λfree, self.Pfree])
+        self.Pfree.add_inputs([self.λfree, self.λfree])
         self.v.add_inputs([self.v, self.m, self.P_λ])
-        self.m.add_inputs([self.m, self.P_λ])
-        #self.P_λ.add_inputs([self.λ, self.λtilde, self.P_λ])
-        self.P_λ.add_inputs([self.λ, self.λ, self.P_λ])
+        #self.v.add_inputs([self.m, self.P_λ])
+        self.m.add_inputs([self.n, self.m, self.P_λ])
+        #self.m.add_inputs([])
+        self.P_λ.add_inputs([self.λ])
         self.P_Λ.add_inputs([self.z, self.Z, self.Y, self.Pfree])
+        #self.P_Λ.add_inputs([self.Z, self.Y, self.Pfree])
         self.X.add_inputs([self.m])
         self.Y.add_inputs([self.P_λ, self.v])
+        #self.Y.add_inputs([self.P_λ])
         self.Z.add_inputs([self.v])
+        #self.Z.add_inputs([])
         self.W.add_inputs([self.P_λ, self.m])
         self.nbar.add_inputs([self.W, self.Pfree, self.x, self.P_Λ, self.X])
 
@@ -671,6 +669,8 @@ class GIF_mean_field(models.Model):
     def init_populations(self):
         """
         Based on InitPopulations (p. 52)
+
+        TODO: Call this every time the model is updated
         """
         # FIXME: Initialize series' to 0
 
@@ -722,23 +722,37 @@ class GIF_mean_field(models.Model):
         # Make all neurons free neurons
         idx = self.x.t0idx - 1; assert(idx >= 0)
         data = self.x._data.get_value(borrow=True)
-        data[idx,:] = self.params.N
+        data[idx,:] = self.params.N.get_value()
         self.x._data.set_value(data, borrow=True)
 
         # Set refractory membrane potential to u_rest
         idx = self.u.t0idx - 1; assert(idx >= 0)
         data = self.u._data.get_value(borrow=True)
-        data[idx,:] = self.params.u_rest
+        data[idx,:] = self.params.u_rest.get_value()
         self.u._data.set_value(data, borrow=True)
 
         # Set free membrane potential to u_rest
         idx = self.h.t0idx - 1; assert(idx >= 0)
         data = self.h._data.get_value(borrow=True)
-        data[idx,:] = self.params.u_rest
+        data[idx,:] = self.params.u_rest.get_value()
         self.h._data.set_value(data, borrow=True)
 
         #self.g_l.set_value( np.zeros((self.Npops, self.Nθ)) )
         #self.y.set_value( np.zeros((self.Npops, self.Npops)) )
+
+        # TODO: Use a switch here, so ref_mask can have a symbolic dependency on t_ref
+        # Create the refractory mask
+        # This mask is zero for time bins within the refractory period,
+        # such that it can be multiplied element-wise with arrays of length K
+        self.ref_mask = np.ones(self.u.shape)
+        for l in range(self.ref_mask.shape[0]):
+            # Loop over lags. l=0 corresponds to t-Δt, l=1 to t-2Δt, etc.
+            for α in range(self.ref_mask.shape[1]):
+                # Loop over populations α
+                if (l+1)*self.dt < self.params.t_ref.get_value()[α]:
+                    self.ref_mask[l, α] = 0
+                else:
+                    break
 
     def A_fn(self, t):
         """p. 52"""
@@ -778,14 +792,13 @@ class GIF_mean_field(models.Model):
         # FIXME: I'm pretty sure some time indices are wrong (should be ±1)
         #τs_flat = self.params.τ_s.flatten()
         #τm_flat = self.params.τ_m.flatten()
-        tidx_y = self.y.get_t_idx(t)
         red_factor_τm = shim.exp(-self.h_tot.dt/self.params.τ_m)
         red_factor_τs = shim.exp(-self.h_tot.dt/self.params.τ_s)
         return ( self.params.u_rest + self.params.R*self.I_ext[t] * (1 - red_factor_τm)
                  + ( self.params.τ_m * (self.params.p * self.params.w) * self.params.N
                        * (self.A_Δ[t]
-                          + ( ( self.params.τ_s * red_factor_τs * ( self.y[tidx_y] - self.A_Δ[t] )
-                                - red_factor_τm * (self.params.τ_s * self.y[tidx_y] - self.params.τ_m * self.A_Δ[t]) )
+                          + ( ( self.params.τ_s * red_factor_τs * ( self.y[t] - self.A_Δ[t] )
+                                - red_factor_τm * (self.params.τ_s * self.y[t] - self.params.τ_m * self.A_Δ[t]) )
                               / (self.params.τ_s - self.params.τ_m) ) )
                    ).sum(axis=-1) )
 
@@ -855,7 +868,7 @@ class GIF_mean_field(models.Model):
         """p.53, line 17 and 35"""
         tidx_u = self.u.get_t_idx(t)
         red_factor = shim.exp(-self.u.dt/self.params.τ_m).flatten()[np.newaxis, ...]
-        return np.concatenate(
+        return shim.concatenate(
             ( self.params.u_r[..., np.newaxis, :],
               ((self.u[tidx_u-1][:-1] - self.params.u_rest[np.newaxis, ...]) * red_factor + self.h_tot[t][np.newaxis,...]) ),
             axis=-2)
@@ -906,7 +919,7 @@ class GIF_mean_field(models.Model):
         tidx_v = self.v.get_t_idx(t)
         #tidx_m = self.m.get_t_idx(t)
         return shim.concatenate(
-            ( np.zeros(self.v.shape[:-1] + (1,)),
+            ( shim.zeros(self.v.shape[:-1] + (1,), dtype=sinn.config.floatX),
               ((1 - self.P_λ[t])**2 * self.v[tidx_v-1] + self.P_λ[t] * self.m[t])[...,:-1]
             ),
             axis=-1)
