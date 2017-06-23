@@ -620,18 +620,23 @@ class GIF_mean_field(models.Model):
         self.W.add_inputs([self.P_λ, self.m])
         self.nbar.add_inputs([self.W, self.Pfree, self.x, self.P_Λ, self.X])
 
-        if self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1:
+        #if self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1:
+        if self.A.locked:
             self.given_A()
 
     def given_A(self):
-        """Run this function when A is given data. It changes reverses the dependency
+        """Run this function when A is given data. It reverses the dependency
         n -> A to A -> n and fills the n array"""
         assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1)
         self.n.clear_inputs()
         # TODO: use op
-        self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
+        #self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
+        self.n.pad(self.A.t0idx)
+        self.A.pad(self.n.t0idx)  # Increase whichever has less padding
+        ndata = self.A._data * self.params.N * self.A.dt
         self.n.add_input(self.A)
-        self.n.set()
+        self.n.set(ndata)
+        self.n.lock()
 
     def f(self, u):
         """Link function. Maps difference between membrane potential & threshold
