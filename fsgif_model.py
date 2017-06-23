@@ -684,13 +684,26 @@ class GIF_mean_field(models.Model):
             # Starts at dt because memory buffer does not include current time
         self.θ_dis.set_update_function(
             lambda t: self.θ1.eval(t) + self.θ2.eval(t) )
+        # HACK Currently we only support updating by one histories timestep
+        #      at a time (Theano), so for kernels (which are fully computed
+        #      at any time step), we index the underlying data tensor
+        self.θ_dis.set()
 
         # TODO: Use operations
         self.θtilde_dis = Series(self.θ_dis, 'θtilde_dis',)
-        self.θtilde_dis.set_update_function(
-            lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis[t]/self.params.Δu) ) / self.params.N )
+        # DEBUG (was lambda)
+        # HACK θ_dis._data should be θ_dis
+        def θtilde_upd_fn(t):
+            tidx = self.θ_dis.get_t_idx(t)
+            return self.params.Δu * (1 - shim.exp(-self.θ_dis._data[tidx]/self.params.Δu) ) / self.params.N
+        self.θtilde_dis.set_update_function(θtilde_upd_fn)
+        # self.θtilde_dis.set_update_function(
+        #     lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis._data[t]/self.params.Δu) ) / self.params.N )
         self.θtilde_dis.add_inputs([self.θ_dis])
-
+        # HACK Currently we only support updating by one histories timestep
+        #      at a time (Theano), so for kernels (which are fully computed
+        #      at any time step), we index the underlying data tensor
+        self.θtilde_dis.set()
 
         ## Initialize variables that are defined through an ODE
         for series in [self.n, self.m, self.u, self.v, self.λ, self.P_λ]:
@@ -855,14 +868,18 @@ class GIF_mean_field(models.Model):
         # FIXME: does not correctly include cancellation from line 11
         # FIXME: t-self.K+1:t almost certainly wrong
         tidx_n = self.n.get_t_idx(t)
-        #tidx_θ = self.θtilde_dis.get_t_idx(t)
         K = self.u.shape[0]
-        varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n] * self.θtilde_dis[:K][...,::-1,:],
+        # DEBUG
+        #if shim.cf.use_theano:
+        #    K = shim.print(K, "K : ")
+        #θtilde = shim.print(self.θtilde_dis._data, "θtilde data")  # DEBUG
+        # HACK: use of ._data to avoid indexing θtilde (see comment where it is created)
+        varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
-                    - self.n[tidx_n-K]*self.θtilde_dis[K-1:K] )[...,::-1,:]
+                    - shim.addbroadcast(self.n[tidx_n-K]*self.θtilde_dis._data[K-1:K], -2) )[...,::-1,:]
         # FIXME: Use indexing that is robust to θtilde_dis' t0idx
         # FIXME: Check that this is really what line 15 says
-        return self.θ_dis[:K] + self.varθfree[t] + varθref
+        return self.θ_dis._data[:K] + self.varθfree[t] + varθref
 
     def u_fn(self, t):
         """p.53, line 17 and 35"""
