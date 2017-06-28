@@ -514,11 +514,15 @@ class GIF_mean_field(models.Model):
 
         #####################################################
         # Create the loglikelihood function
+        # FIXME: Doesn't work with Theano histories because they only support updating tidx+1
+        #        Need to create a Variable(History) type, which doesn't
+        #        trigger 'compute_up_to'.
         # TODO: Use op and write as `self.nbar / self.params.N`
-        phist = Series(self.nbar, 'p')
-        phist.set_update_function(lambda t: self.nbar[t] / self.params.N)
-        phist.add_inputs([self.nbar])
-        self.loglikelihood = self.make_loglikelihood_binomial(
+        #phist = Series(self.nbar, 'p')
+        #phist.set_update_function(lambda t: self.nbar[t] / self.params.N)
+        #phist.add_inputs([self.nbar])
+        phist = self.nbar / self.params.N
+        self.loglikelihood = self.make_binomial_loglikelihood(
             self.n, self.params.N, phist, approx='low p')
         #####################################################
 
@@ -580,9 +584,9 @@ class GIF_mean_field(models.Model):
         self.nbar.set_update_function(self.nbar_fn)
 
 
-        # HACK: At present, sinn dependencies don't support lagged
-        #       inputs (all inputs are assumed to need the same time point t),
-        #       so only inputs at the same time point are specified.
+        # FIXME: At present, sinn dependencies don't support lagged
+        #        inputs (all inputs are assumed to need the same time point t),
+        #        while some of the dependencies below are on previous time points
         self.A.add_inputs([self.n])
         self.n.add_inputs([self.nbar])
         self.h.add_inputs([self.h, self.h_tot])
@@ -626,7 +630,9 @@ class GIF_mean_field(models.Model):
 
     def given_A(self):
         """Run this function when A is given data. It reverses the dependency
-        n -> A to A -> n and fills the n array"""
+        n -> A to A -> n and fills the n array
+        WARNING: We've hidden the dependency on params.N here.
+        """
         assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1)
         self.n.clear_inputs()
         # TODO: use op
@@ -635,7 +641,8 @@ class GIF_mean_field(models.Model):
         self.A.pad(self.n.t0idx)  # Increase whichever has less padding
         ndata = self.A._data * self.params.N * self.A.dt
         self.n.add_input(self.A)
-        self.n.set(ndata)
+        self.n.set(ndata.eval())
+            # TODO: Don't remove dependence on self.param.N
         self.n.lock()
 
     def f(self, u):

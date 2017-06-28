@@ -8,6 +8,7 @@ author: Alexandre René
 import logging
 import os.path
 import time
+import copy
 import numpy as np
 import scipy as sp
 import collections
@@ -53,6 +54,7 @@ if __name__ == "__main__":
     logger.addHandler(ch)
 
 _BASENAME = "fsgif"
+#sinn.config.set_floatX('float32')  # Hardcoded; must match theano's floatX
 
 def load_theano():
     """
@@ -60,6 +62,13 @@ def load_theano():
     Currently this is not supported for data generation.
     """
     shim.load_theano()
+
+# Store loaded objects like model instances
+loaded = {}
+filenames = {}  # filenames of loaded objects which are also saved to disk
+params = {}
+compiled = {}
+
 
 ################################
 # Model creation
@@ -266,30 +275,76 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
 # Data generation functions
 #############################
 
-def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
+def load_spikes(filename=None):
+    global loaded, filenames
+
+    if 'spiking model' in loaded:
+        return filenames['spiking model']
 
     if filename is None:
         filename = _BASENAME + "_spikes.dat"
 
-    datafound = False
+    logger.info("Checking for precomputed data...")
+    try:
+        loaded['spiking model'] = io.load(filename)
+        fixparams(loaded['spiking model'])
+    except FileNotFoundError:
+        try:
+            fn, ext = os.path.splitext(filename)
+            shist = histories.Spiketrain.from_raw(io.loadraw(fn + "_spikes" + ext))
+            Ihist = histories.Series.from_raw(io.loadraw(fn + "_input" + ext))
+            loaded['spiking model'] = init_spiking_model(shist, Ihist)
+        except FileNotFoundError:
+            pass
+
+    if 'spiking model' in loaded:
+        # The spiking model is considered the ground truth
+        loaded['true params'] = copy.deepcopy(loaded['spiking model'])
+
+    filenames['spiking model'] = filename
+    return filename
+
+def load_mf(filename=None):
+    global loaded, filenames
+
+    if 'mf model' in loaded:
+        return filenames['mf model']
+
+    if filename is None:
+        filename = _BASENAME + ".dat"
+
+    logger.info("Checking for precomputed data...")
+    try:
+        loaded['mf model'] = io.load(filename)
+        fixparams(loaded['mf model'])
+    except FileNotFoundError:
+        try:
+            fn, ext = os.path.splitext(filename)
+            Ahist = histories.Spiketrain.from_raw(io.loadraw(fn + "_mf" + ext))
+            Ihist = histories.Series.from_raw(io.loadraw(fn + "_input" + ext))
+            loaded['mf model'] = init_mean_field_model(Ahist, Ihist)
+        except FileNotFoundError:
+            pass
+
+    filenames['mf model'] = filename
+    return filename
+
+def fixparams(model):
+    """HACK Fix for models loaded from files that don't set the parameters' names"""
+    for key, val in zip(model.params._fields, model.params):
+        val.name = key
+
+def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
+    global loaded
 
     if not recalculate:
         # Try to load precomputed data
-        logger.info("Checking for precomputed data...")
-        try:
-            spiking_model = io.load(filename)
-            datafound = True
-        except FileNotFoundError:
-            try:
-                fn, ext = os.path.splitext(filename)
-                shist = histories.Spiketrain.from_raw(io.loadraw(fn + "_spikes" + ext))
-                Ihist = histories.Series.from_raw(io.loadraw(fn + "_input" + ext))
-                spiking_model = init_spiking_model(shist, Ihist)
-                datafound = True
-            except FileNotFoundError:
-                pass
+        filename = load_spikes(filename)
+    elif 'spiking model' in loaded:
+        del loaded['spiking model']
 
-    if not datafound:
+    if 'spiking model' not in loaded:
+        # Spike data was not found
         logger.info("No precomputed data found. Generating new data...")
         spiking_model = init_spiking_model(datalen=datalen)
         shist = spiking_model.s
@@ -309,9 +364,11 @@ def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
             io.saveraw(fn + "_input" + ext, Ihist)
 
         logger.info("Done.")
+        loaded['spiking model'] = spiking_model
 
     else:
         logger.info("Precomputed data found. Skipping data generation")
+        spiking_model = loaded['spiking model']
 
     sinn.flush_log_queue()
 
@@ -319,28 +376,15 @@ def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
 
 
 def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
+    global loaded
 
-    if filename is None:
-        filename = _BASENAME + ".dat"
-
-    datafound = False
     if not recalculate:
         # Try to load precomputed data
-        logger.info("Checking for precomputed data...")
-        try:
-            mf_model = io.load(filename)
-            datafound = True
-        except FileNotFoundError:
-            try:
-                fn, ext = os.path.splitext(filename)
-                Ahist = histories.Spiketrain.from_raw(io.loadraw(fn + "_mf" + ext))
-                Ihist = histories.Series.from_raw(io.loadraw(fn + "_input" + ext))
-                mf_model = init_mean_field_model(shist, Ihist)
-                datafound = True
-            except FileNotFoundError:
-                pass
+        filename = load_mf(filename)
+    elif 'mf model' in loaded:
+        del loaded['mf model']
 
-    if not datafound:
+    if 'mf model' not in loaded:
         logger.info("No precomputed data found. Generating new data...")
         mf_model = init_mean_field_model(datalen=datalen)
         Ahist = mf_model.A
@@ -360,6 +404,7 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
             io.saveraw(fn + "_input" + ext, Ihist)
 
         logger.info("Done.")
+        loaded['mf model'] = mf_model
 
     else:
         logger.info("Precomputed data found. Skipping data generation")
@@ -369,8 +414,328 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
     return mf_model
 
 ###########################
-# Perform a 2D likelihood sweep
+# Data processing functions
 ###########################
+
+def compute_spike_activity(filename=None):
+
+    if 'spike activity' in loaded:
+        return loaded['spike activity']
+
+    load_spikes(filename)
+    shist = loaded['spiking model'].s
+
+    spikeAhist = anlz.mean(shist, shist.pop_slices) / shist.dt
+    spikeAhist.name = "A (spikes)"
+    spikeAhist.lock()
+
+    # Subsample the activity and input
+    Ahist = anlz.subsample(spikeAhist, np.rint(mf_dt / spike_dt).astype('int'))
+    Ahist.lock()
+    Ihist = anlz.subsample(loaded['spiking model'].I_ext, np.rint(mf_dt / spike_dt).astype('int'))
+    Ihist.lock()
+
+    # Remove dependencies of the subsampled data on the original
+    # (this is to workaround some of sinn's intricacies)
+    sinn.inputs[Ahist].clear()
+    sinn.inputs[Ihist].clear()
+
+    loaded['spike activity'] = { 'Ahist': Ahist,
+                                 'Ihist': Ihist }
+
+
+def derive_mf_model_from_spikes(filename=None):
+
+    if 'derived mf model' in loaded:
+        return loaded['derived mf model']
+
+    compute_spike_activity(filename)
+
+    if not shim.cf.use_theano:
+        load_theano()
+
+    logger.info("Producing Theano mean-field model.")
+
+    spikemodel = loaded['spiking model']
+    Ahist = loaded['spike activity']['Ahist']
+    Ihist = loaded['spike activity']['Ihist']
+
+    Ahist.convert_to_theano()
+    Ihist.convert_to_theano()
+        # These are safe to call (noops) on Theano histories
+
+    model_paramsT = gif.GIF_mean_field.Parameters(
+        **sinn.convert_parameters_to_theano(spikemodel.params))
+
+    mfmodel = init_mean_field_model(Ahist,
+                                    Ihist,
+                                    model_params=model_paramsT)
+
+    logger.info("Theano model complete.")
+
+    loaded['derived mf model'] = mfmodel
+    return mfmodel
+
+###########################
+# Likelihood functions
+###########################
+
+def make_loglikelihood_graph1(filename=None):
+    global loaded, params
+
+    if 'logL graph' in loaded:
+        return loaded['logL graph']
+
+    mfmodel = derive_mf_model_from_spikes(filename)
+
+    logger.info("Producing the likelihood graph.")
+
+    ####################
+    # Some hacks to get around current limitations
+    loaded['spiking model'].λ.name = 'spikeλ'   # remove duplicate name
+    loaded['spiking model'].u.name = 'spikeu'
+
+    histnames_to_delete = ['A_subsampled_by_5_smoothed']
+    dellist = []
+    for h in mfmodel.history_inputs:
+        if h.name in histnames_to_delete:
+            dellist.append(h)
+    for h in dellist:
+        del mfmodel.history_inputs[h]
+
+    dellist = []
+    for h in sinn.inputs:
+        if h.name in histnames_to_delete:
+            dellist.append(h)
+    for h in dellist:
+        del sinn.inputs[h]
+    # End hacks
+    #####################
+
+    # TODO: Make these options/parameters
+    burnin = 0.5
+    datalen = 3.4
+
+    #burninidx = mfmodel.nbar.get_t_idx(burnin)
+    endidx = mfmodel.nbar.get_t_idx(burnin+datalen)
+
+    def onestep(t):
+        output_res_idx = mfmodel.nbar[t]
+        return shim.get_updates()
+    _, upds = shim.gettheano().scan(onestep, sequences=np.arange(0, endidx))
+
+    mfmodel.apply_updates(upds)
+
+    # TODO: Use the loglikelihood function in mfmodel
+    #logL = mfmodel.loglikelihood(burnin, burnin+datalen)
+
+    start = burnin
+    stop = burnin + datalen
+
+    N = mfmodel.params.N
+    n_arr = shim.cast(mfmodel.n[start:stop], 'int32')
+    p_arr = sinn.clip_probabilities( mfmodel.nbar[start:stop] / N )
+
+    logL = shim.sum( -shim.log(shim.factorial(n_arr, exact=False))
+                     -(N-n_arr)*shim.log(N - n_arr) + N-n_arr + n_arr*shim.log(p_arr)
+                     + (N-n_arr)*shim.log(1-p_arr) )
+
+
+    loaded['logL graph'] = logL
+
+    logger.info("Likelihood graph complete")
+
+    return logL
+
+
+def make_loglikelihood_graph2(filename):
+    global loaded
+
+    if 'logL graph' in loaded:
+        return loaded['logL graph']
+
+    if not shim.cf.use_theano:
+        load_theano()
+
+    mfmodel = derive_mf_model_from_spikes(filename)
+
+    logger.info("Producing the likelihood graph.")
+
+    ####################
+    # Some hacks to get around current limitations
+    loaded['spiking model'].λ.name = 'spikeλ'   # remove duplicate name
+    loaded['spiking model'].u.name = 'spikeu'
+
+    histnames_to_delete = ['A_subsampled_by_5_smoothed']
+    dellist = []
+    for h in mfmodel.history_inputs:
+        if h.name in histnames_to_delete:
+            dellist.append(h)
+    for h in dellist:
+        del mfmodel.history_inputs[h]
+
+    dellist = []
+    for h in sinn.inputs:
+        if h.name in histnames_to_delete:
+            dellist.append(h)
+    for h in dellist:
+        del sinn.inputs[h]
+    # End hacks
+    #####################
+
+    # TODO: Make these options/parameters
+    burnin = 0.5
+    datalen = 3.4
+
+    #burninidx = mfmodel.nbar.get_t_idx(burnin)
+    endidx = mfmodel.nbar.get_t_idx(burnin+datalen)
+    N = mfmodel.params.N
+
+    def logLstep(t, cum_logL):
+        p = sinn.clip_probabilities(mfmodel.nbar[t] / mfmodel.params.N)
+        n = shim.cast(mfmodel.n[t], 'int32')
+
+        cum_logL += ( -shim.log(shim.factorial(n, exact=False))
+                      -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
+                      + (N-n)*shim.log(1-p)
+                     ).sum()
+
+        return [cum_logL], shim.get_updates()
+
+    # TODO: Exclude burnin from logL
+
+    logL, upds = shim.gettheano().scan(logLstep,
+                                       sequences = np.arange(0, endidx),
+                                       outputs_info = np.float64(0))
+                                       #outputs_info = shim.cast(0, 'float64'))
+
+    loaded['logL graph'] = logL[-1]
+    return logL[-1]
+
+def compile_theano_loglikelihood():
+    global compiled
+
+    logL = make_loglikelihood_graph2()
+
+    logger.info("Compiling loglikelihood graph")
+    compiled['logL'] = shim.gettheano().function([], [logL])
+    logger.info("Done compilation.")
+
+    return compiled['logL']
+
+def make_loglikelihood_step(filename=None):
+    global loaded
+
+    if 'logL step' in loaded:
+        return loaded['logL step'], loaded['logL step inputs']
+
+    mfmodel = derive_mf_model_from_spikes(filename)
+
+    logger.info("Producing the likelihood graph.")
+
+    ####################
+    # Some hacks to get around current limitations
+    loaded['spiking model'].λ.name = 'spikeλ'   # remove duplicate name
+    loaded['spiking model'].u.name = 'spikeu'
+
+    histnames_to_delete = ['A_subsampled_by_5_smoothed']
+    dellist = []
+    for h in mfmodel.history_inputs:
+        if h.name in histnames_to_delete:
+            dellist.append(h)
+    for h in dellist:
+        del mfmodel.history_inputs[h]
+
+    dellist = []
+    for h in sinn.inputs:
+        if h.name in histnames_to_delete:
+            dellist.append(h)
+    for h in dellist:
+        del sinn.inputs[h]
+    # End hacks
+    #####################
+
+    #tidx = shim.getT().scalar('tidx', dtype='int32')
+    tvar = shim.getT().scalar('t', dtype='float32')
+    p = sinn.clip_probabilities(mfmodel.nbar[tvar] / mfmodel.params.N)
+    n = shim.cast(mfmodel.n[tvar], 'int32')
+    N = mfmodel.params.N
+
+    logL_step = ( -shim.log(shim.factorial(n, exact=False))
+                  -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
+                  + (N-n)*shim.log(1-p)
+                ).sum()
+
+    logger.info("Likelihood graph complete.")
+
+    loaded['logL step'] = logL_step
+    loaded['logL step inputs'] = [tvar]
+    return logL_step, [tvar]
+
+def compile_theano_loglikelihood2():
+    global compiled
+
+    if 'logL' in compiled:
+        return compiled['logL']
+
+    if not shim.config.use_theano:
+        load_theano()
+
+    logL, inputs = make_loglikelihood_step()
+
+    logger.info("Compiling loglikelihood step")
+    logL_step = shim.gettheano().function(
+        inputs, logL, updates=shim.get_updates())
+    logger.info("Done compiling.")
+
+    def logL_fn(burnin, datalen):
+
+        logger.info("Computing loglikelihood.")
+        for t in np.arange(0, burnin, mfmodel.n.dt, dtype='float32'):
+            # Fill the data without saving log L
+            logL_step(t)
+
+        logL = sum( logL_step(t)
+                    for t in np.arange(burnin, burnin+datalen,
+                                       mfmodel.n.dt, dtype='float32') )
+        logger.info("Done.")
+        return logL
+
+    compiled['logL'] = logL_fn
+    return logL_fn
+
+def compile_theano_gradloglikelihood2(wrt):
+    global compiled
+
+    if 'grad logL' in compiled:
+        return compiled['grad logL']
+
+    if not shim.config.use_theano:
+        load_theano()
+
+    logL, inputs = make_loglikelihood_step()
+    mfmodel = loaded['derived mf model']
+
+    logger.info("Compiling loglikelihood gradient steps.")
+    gradlogL_step = shim.gettheano().function(
+        inputs, shim.getT().grad(logL, wrt), updates=shim.get_updates())
+    logger.info("Done compiling.")
+
+    def gradlogL_fn(burnin, datalen):
+
+        logger.info("Computing loglikelihood gradient.")
+        for t in np.arange(0, burnin, mfmodel.n.dt, dtype='float32'):
+            # Fill the data without saving grad log L
+            gradlogL_step(t)
+
+        gradlogL = sum( gradlogL_step(t)
+                    for t in np.arange(burnin, burnin+datalen,
+                                       mfmodel.n.dt, dtype='float32') )
+        logger.info("Done.")
+        return gradlogL
+
+    compiled['grad logL'] = gradlogL_fn
+    return gradlogL_fn
 
 def get_sweep_param(name, index, fineness):
     # index is including so that ranges may depend on it
@@ -489,6 +854,29 @@ def likelihood_sweep(param1, param2, fineness,
 ###########################
 # Plotting
 ###########################
+
+def plot_raster(burnin, datalen, filename=None):
+    load_spikes(filename)
+    spikemodel = loaded['spiking model']
+
+    plt.title("Generated spikes")
+    anlz.plot(spikemodel.s, label="Population",
+              start=burnin, stop=burnin+datalen,
+              lineheight=1,
+              markersize=1,
+              alpha=0.3)
+    plt.legend()
+
+def plot_spike_activity(filename=None):
+    if 'spike activity' not in loaded:
+        compute_spike_activity(filename)
+
+    Ahist = loaded['spike activity']['Ahist']
+
+    plt.title("Activity (summed spikes, smoothed, 10ms window)")
+    anlz.plot(anlz.smooth(Ahist, 10), label='A (spikes)', alpha=0.7)
+    plt.legend()
+
 
 def plot_likelihood(loglikelihood_filename = None,
                     ellipse = None,
