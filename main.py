@@ -513,8 +513,8 @@ def make_loglikelihood_graph1(filename=None):
     #####################
 
     # TODO: Make these options/parameters
-    burnin = 0.5
-    datalen = 3.4
+    burnin = 0.0
+    datalen = 0.01
 
     #burninidx = mfmodel.nbar.get_t_idx(burnin)
     endidx = mfmodel.nbar.get_t_idx(burnin+datalen)
@@ -548,7 +548,7 @@ def make_loglikelihood_graph1(filename=None):
     return logL
 
 
-def make_loglikelihood_graph2(filename):
+def make_loglikelihood_graph2(filename=None):
     global loaded
 
     if 'logL graph' in loaded:
@@ -584,16 +584,16 @@ def make_loglikelihood_graph2(filename):
     #####################
 
     # TODO: Make these options/parameters
-    burnin = 0.5
-    datalen = 3.4
+    burnin = 0.0
+    datalen = 0.01
 
     #burninidx = mfmodel.nbar.get_t_idx(burnin)
     endidx = mfmodel.nbar.get_t_idx(burnin+datalen)
     N = mfmodel.params.N
 
-    def logLstep(t, cum_logL):
-        p = sinn.clip_probabilities(mfmodel.nbar[t] / mfmodel.params.N)
-        n = shim.cast(mfmodel.n[t], 'int32')
+    def logLstep(tidx, cum_logL):
+        p = sinn.clip_probabilities(mfmodel.nbar[tidx+mfmodel.nbar.t0idx] / mfmodel.params.N)
+        n = shim.cast(mfmodel.n[tidx+mfmodel.n.t0idx], 'int32')
 
         cum_logL += ( -shim.log(shim.factorial(n, exact=False))
                       -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
@@ -608,6 +608,8 @@ def make_loglikelihood_graph2(filename):
                                        sequences = np.arange(0, endidx),
                                        outputs_info = np.float64(0))
                                        #outputs_info = shim.cast(0, 'float64'))
+
+    logger.info("Likelihood graph complete")
 
     loaded['logL graph'] = logL[-1]
     return logL[-1]

@@ -447,7 +447,7 @@ class GIF_mean_field(models.Model):
               for α in range(self.Npops) ],
             axis = 0)
         # A will be indexed by 0 - Δ_idx
-        self.A.pad(self.Δ_idx.max() + 1) # +1 HACK
+        self.A.pad(self.Δ_idx.max() + 1) # +1 HACK; not sure if required
 
         # Hyperparameters ?
         self.Nθ = 1  # Number of exponentials in threshold kernel
@@ -521,9 +521,9 @@ class GIF_mean_field(models.Model):
         #phist = Series(self.nbar, 'p')
         #phist.set_update_function(lambda t: self.nbar[t] / self.params.N)
         #phist.add_inputs([self.nbar])
-        phist = self.nbar / self.params.N
-        self.loglikelihood = self.make_binomial_loglikelihood(
-            self.n, self.params.N, phist, approx='low p')
+        #phist = self.nbar / self.params.N
+        #self.loglikelihood = self.make_binomial_loglikelihood(
+        #    self.n, self.params.N, phist, approx='low p')
         #####################################################
 
         self.add_history(self.A)
@@ -645,17 +645,19 @@ class GIF_mean_field(models.Model):
             # TODO: Don't remove dependence on self.param.N
         self.n.lock()
 
-    def f(self, u):
-        """Link function. Maps difference between membrane potential & threshold
-        to firing rate."""
-        return self.params.c * shim.exp(u/self.params.Δu.flatten())
+        self.A_Δ.set()
+        self.A_Δ._original_data.set_value(self.A_Δ._data.eval())  # HACK
+        self.A_Δ._data = self.A_Δ._original_data
+        self.A_Δ.lock()
 
     def get_t_idx(self, t):
         """
-        Returns the time index corresponding to t such that it is compatible
-        with loglikelihood / simulation timestep.
+        Returns the time index corresponding to t, with 0 corresponding to t0.
         """
-        return self.A.get_t_idx(t)
+        if shim.istype(t, 'int'):
+            return t
+        else:
+            return self.A.get_t_idx(t) - self.A.t0idx
     def index_interval(self, Δt):
         return self.A.index_interval(Δt)
 
@@ -778,6 +780,56 @@ class GIF_mean_field(models.Model):
                     self.ref_mask[l, α] = 0
                 else:
                     break
+
+    def loglikelihood(self, start, end):
+        logger.info("Producing the likelihood graph.")
+
+        ####################
+        # Some hacks to get around current limitations
+
+        histnames = [h.name for h in self.history_set]
+        dellist = []
+        for h in sinn.inputs:
+            if h.name not in histnames:
+                dellist.append(h)
+        for h in dellist:
+            del sinn.inputs[h]
+        # End hacks
+        #####################
+
+        startidx = self.get_t_idx(start)
+        endidx = self.get_t_idx(end)
+        N = self.params.N
+
+        def logLstep(tidx, cum_logL):
+            p = sinn.clip_probabilities(self.nbar[tidx+self.nbar.t0idx] / self.params.N)
+            n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
+
+            cum_logL += ( -shim.log(shim.factorial(n, exact=False))
+                        -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
+                        + (N-n)*shim.log(1-p)
+                        ).sum()
+
+            return [cum_logL], shim.get_updates()
+
+        # FIXME np.float64 -> shim.floatX or sinn.floatX
+        logL, upds = shim.gettheano().scan(logLstep,
+                                           sequences = shim.getT().arange(startidx, endidx+1),
+                                           outputs_info = np.float64(0))
+
+        self.apply_updates(upds)
+            # Applying updates is essential to remove the temporary iteration variable
+            # scan introduces from the shim updates dictionary
+
+        logger.info("Likelihood graph complete")
+
+        return logL[-1], upds
+
+
+    def f(self, u):
+        """Link function. Maps difference between membrane potential & threshold
+        to firing rate."""
+        return self.params.c * shim.exp(u/self.params.Δu.flatten())
 
     def A_fn(self, t):
         """p. 52"""
