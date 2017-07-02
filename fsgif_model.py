@@ -812,18 +812,28 @@ class GIF_mean_field(models.Model):
 
             return [cum_logL], shim.get_updates()
 
-        # FIXME np.float64 -> shim.floatX or sinn.floatX
-        logL, upds = shim.gettheano().scan(logLstep,
-                                           sequences = shim.getT().arange(startidx, endidx+1),
-                                           outputs_info = np.float64(0))
+        if shim.config.use_theano:
+            # FIXME np.float64 -> shim.floatX or sinn.floatX
+            logL, upds = shim.gettheano().scan(logLstep,
+                                               sequences = shim.getT().arange(startidx, endidx+1),
+                                               outputs_info = np.float64(0))
 
-        self.apply_updates(upds)
-            # Applying updates is essential to remove the temporary iteration variable
-            # scan introduces from the shim updates dictionary
+            self.apply_updates(upds)
+                # Applying updates is essential to remove the temporary iteration variable
+                # scan introduces from the shim updates dictionary
 
-        logger.info("Likelihood graph complete")
+            logger.info("Likelihood graph complete")
 
-        return logL[-1], upds
+            return logL[-1], upds
+        else:
+            # TODO: Remove this branch once shim.scan is implemented
+            logL = 0
+            for t in np.arange(startidx, endidx+1):
+                logL = logLstep(t)[0][0]
+            upds = shim.get_updates()
+
+            return logL, upds
+
 
 
     def f(self, u):

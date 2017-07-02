@@ -42,10 +42,11 @@ import fsgif_model as gif
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
-if __name__ == "__main__":
+def _init_logging_handlers():
     # Only attach handlers if running as a script
+    import logging.handlers
     fh = logging.handlers.RotatingFileHandler('fsgif_main.log', mode='w', maxBytes=5e5, backupCount=5)
-    fh.setLevel(logging.INFO)
+    fh.setLevel(sinn.LoggingLevels.MONITOR)
     fh.setFormatter(sinn.config.logging_formatter)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
@@ -68,7 +69,6 @@ loaded = {}
 filenames = {}  # filenames of loaded objects which are also saved to disk
 params = {}
 compiled = {}
-
 
 ################################
 # Model creation
@@ -278,6 +278,10 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
 def load_spikes(filename=None):
     global loaded, filenames
 
+    # Temporarily unload Theano since it isn't supported by spike history
+    use_theano = shim.config.use_theano
+    shim.load(load_theano=False)
+
     if 'spiking model' in loaded:
         return filenames['spiking model']
 
@@ -286,8 +290,10 @@ def load_spikes(filename=None):
 
     logger.info("Checking for precomputed data...")
     try:
-        loaded['spiking model'] = io.load(filename)
-        fixparams(loaded['spiking model'])
+        raise FileNotFoundError
+            # HACK: Loading model directly at present doesn't populate sinn.inputs
+        # loaded['spiking model'] = io.load(filename)
+        # fixparams(loaded['spiking model'])
     except FileNotFoundError:
         try:
             fn, ext = os.path.splitext(filename)
@@ -300,6 +306,9 @@ def load_spikes(filename=None):
     if 'spiking model' in loaded:
         # The spiking model is considered the ground truth
         loaded['true params'] = copy.deepcopy(loaded['spiking model'])
+
+    # Reload Theano if it was loaded when we entered the function
+    shim.load(load_theano=use_theano)
 
     filenames['spiking model'] = filename
     return filename
@@ -315,6 +324,8 @@ def load_mf(filename=None):
 
     logger.info("Checking for precomputed data...")
     try:
+        raise FileNotFoundError
+            # HACK: Loading model directly at present doesn't populate sinn.inputs
         loaded['mf model'] = io.load(filename)
         fixparams(loaded['mf model'])
     except FileNotFoundError:
@@ -419,6 +430,10 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
 
 def compute_spike_activity(filename=None):
 
+    # Temporarily unload Theano since it isn't supported by spike history
+    use_theano = shim.config.use_theano
+    shim.load(load_theano=False)
+
     if 'spike activity' in loaded:
         return loaded['spike activity']
 
@@ -443,6 +458,9 @@ def compute_spike_activity(filename=None):
     loaded['spike activity'] = { 'Ahist': Ahist,
                                  'Ihist': Ihist }
 
+    # Reload Theano if it was loaded when we entered the function
+    shim.load(load_theano=use_theano)
+
 
 def derive_mf_model_from_spikes(filename=None):
 
@@ -451,27 +469,29 @@ def derive_mf_model_from_spikes(filename=None):
 
     compute_spike_activity(filename)
 
-    if not shim.cf.use_theano:
-        load_theano()
-
-    logger.info("Producing Theano mean-field model.")
-
     spikemodel = loaded['spiking model']
     Ahist = loaded['spike activity']['Ahist']
     Ihist = loaded['spike activity']['Ihist']
 
-    Ahist.convert_to_theano()
-    Ihist.convert_to_theano()
-        # These are safe to call (noops) on Theano histories
+    if shim.cf.use_theano:
 
-    model_paramsT = gif.GIF_mean_field.Parameters(
-        **sinn.convert_parameters_to_theano(spikemodel.params))
+        logger.info("Producing Theano mean-field model.")
+
+        Ahist.convert_to_theano()
+        Ihist.convert_to_theano()
+            # These are safe to call (noops) on Theano histories
+
+        mfmodel_params = gif.GIF_mean_field.Parameters(
+            **sinn.convert_parameters_to_theano(spikemodel.params))
+    else:
+        mfmodel_params = spikemodel.params
 
     mfmodel = init_mean_field_model(Ahist,
                                     Ihist,
-                                    model_params=model_paramsT)
+                                    model_params=mfmodel_params)
 
-    logger.info("Theano model complete.")
+    if shim.cf.use_theano:
+        logger.info("Theano model complete.")
 
     loaded['derived mf model'] = mfmodel
     return mfmodel
@@ -479,140 +499,6 @@ def derive_mf_model_from_spikes(filename=None):
 ###########################
 # Likelihood functions
 ###########################
-
-def make_loglikelihood_graph1(filename=None):
-    global loaded, params
-
-    if 'logL graph' in loaded:
-        return loaded['logL graph']
-
-    mfmodel = derive_mf_model_from_spikes(filename)
-
-    logger.info("Producing the likelihood graph.")
-
-    ####################
-    # Some hacks to get around current limitations
-    loaded['spiking model'].λ.name = 'spikeλ'   # remove duplicate name
-    loaded['spiking model'].u.name = 'spikeu'
-
-    histnames_to_delete = ['A_subsampled_by_5_smoothed']
-    dellist = []
-    for h in mfmodel.history_inputs:
-        if h.name in histnames_to_delete:
-            dellist.append(h)
-    for h in dellist:
-        del mfmodel.history_inputs[h]
-
-    dellist = []
-    for h in sinn.inputs:
-        if h.name in histnames_to_delete:
-            dellist.append(h)
-    for h in dellist:
-        del sinn.inputs[h]
-    # End hacks
-    #####################
-
-    # TODO: Make these options/parameters
-    burnin = 0.0
-    datalen = 0.01
-
-    #burninidx = mfmodel.nbar.get_t_idx(burnin)
-    endidx = mfmodel.nbar.get_t_idx(burnin+datalen)
-
-    def onestep(t):
-        output_res_idx = mfmodel.nbar[t]
-        return shim.get_updates()
-    _, upds = shim.gettheano().scan(onestep, sequences=np.arange(0, endidx))
-
-    mfmodel.apply_updates(upds)
-
-    # TODO: Use the loglikelihood function in mfmodel
-    #logL = mfmodel.loglikelihood(burnin, burnin+datalen)
-
-    start = burnin
-    stop = burnin + datalen
-
-    N = mfmodel.params.N
-    n_arr = shim.cast(mfmodel.n[start:stop], 'int32')
-    p_arr = sinn.clip_probabilities( mfmodel.nbar[start:stop] / N )
-
-    logL = shim.sum( -shim.log(shim.factorial(n_arr, exact=False))
-                     -(N-n_arr)*shim.log(N - n_arr) + N-n_arr + n_arr*shim.log(p_arr)
-                     + (N-n_arr)*shim.log(1-p_arr) )
-
-
-    loaded['logL graph'] = logL
-
-    logger.info("Likelihood graph complete")
-
-    return logL
-
-
-def make_loglikelihood_graph2(filename=None):
-    global loaded
-
-    if 'logL graph' in loaded:
-        return loaded['logL graph']
-
-    if not shim.cf.use_theano:
-        load_theano()
-
-    mfmodel = derive_mf_model_from_spikes(filename)
-
-    logger.info("Producing the likelihood graph.")
-
-    ####################
-    # Some hacks to get around current limitations
-    loaded['spiking model'].λ.name = 'spikeλ'   # remove duplicate name
-    loaded['spiking model'].u.name = 'spikeu'
-
-    histnames_to_delete = ['A_subsampled_by_5_smoothed']
-    dellist = []
-    for h in mfmodel.history_inputs:
-        if h.name in histnames_to_delete:
-            dellist.append(h)
-    for h in dellist:
-        del mfmodel.history_inputs[h]
-
-    dellist = []
-    for h in sinn.inputs:
-        if h.name in histnames_to_delete:
-            dellist.append(h)
-    for h in dellist:
-        del sinn.inputs[h]
-    # End hacks
-    #####################
-
-    # TODO: Make these options/parameters
-    burnin = 0.0
-    datalen = 0.01
-
-    #burninidx = mfmodel.nbar.get_t_idx(burnin)
-    endidx = mfmodel.nbar.get_t_idx(burnin+datalen)
-    N = mfmodel.params.N
-
-    def logLstep(tidx, cum_logL):
-        p = sinn.clip_probabilities(mfmodel.nbar[tidx+mfmodel.nbar.t0idx] / mfmodel.params.N)
-        n = shim.cast(mfmodel.n[tidx+mfmodel.n.t0idx], 'int32')
-
-        cum_logL += ( -shim.log(shim.factorial(n, exact=False))
-                      -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
-                      + (N-n)*shim.log(1-p)
-                     ).sum()
-
-        return [cum_logL], shim.get_updates()
-
-    # TODO: Exclude burnin from logL
-
-    logL, upds = shim.gettheano().scan(logLstep,
-                                       sequences = np.arange(0, endidx),
-                                       outputs_info = np.float64(0))
-                                       #outputs_info = shim.cast(0, 'float64'))
-
-    logger.info("Likelihood graph complete")
-
-    loaded['logL graph'] = logL[-1]
-    return logL[-1]
 
 def compile_theano_loglikelihood():
     global compiled
@@ -752,7 +638,9 @@ def get_sweep_param(name, index, fineness):
 
 
 def likelihood_sweep(param1, param2, fineness,
-                     mean_field_model = None,
+                     burnin = 0.5, datalen = 3.4,
+                     #mean_field_model = None,
+                     input_filename = None,
                      output_filename = None,
                      recalculate = False,
                      ipp_url_file=None, ipp_profile=None):
@@ -762,7 +650,7 @@ def likelihood_sweep(param1, param2, fineness,
     ----------
     param1: (param, index) tuple
         First parameter to sweep (abscissa).
-        `param` is stre equal to one of the elements of mean_field_model.params.
+        `param` is equal to one of the elements of mean_field_model.params.
         `index` is a tuple indicating the particular index of that
         parameter we want to sweep. If `param` is scalar, specify as `None`.
     param2: (param, index) tuple
@@ -786,8 +674,10 @@ def likelihood_sweep(param1, param2, fineness,
     if output_filename is None:
         output_filename = _BASENAME + '_loglikelihood' + '.dat'
 
-    if mean_field_model is None:
-        mean_field_model = _BASENAME + '.dat'
+    # TODO: clean up / make treatment of mfmodel consistent with other functions
+    #if mean_field_model is None:
+    #    mean_field_model = _BASENAME + '.dat'
+    mean_field_model = derive_mf_model_from_spikes(input_filename)
 
     if isinstance(mean_field_model, str):
         try:
@@ -829,9 +719,37 @@ def likelihood_sweep(param1, param2, fineness,
     param_sweep.add_param(param1[0], idx=param1[1], axis_stops=param1_stops)
     param_sweep.add_param(param2[0], idx=param2[1], axis_stops=param2_stops)
 
-    param_sweep.set_function(mean_field_model.get_loglikelihood(start=burnin,
-                                                              stop=burnin+data_len),
-                             'log $L$')
+    # param_sweep.set_function(mean_field_model.get_loglikelihood(start=burnin,
+    #                                                             stop=burnin+data_len),
+    #                          'log $L$')
+
+    # HACK: Defining the logL function with batches instead of one scan
+    mbatch_size=2
+    burnin_idx = mean_field_model.get_t_idx(burnin)
+    stop_idx = mean_field_model.get_t_idx(burnin+data_len)
+    if shim.config.use_theano:
+        # HACK: Workaround for issue with `sinn`
+        loaded['spiking model'].λ.name = 'spikeλ'
+        loaded['spiking model'].u.name = 'spikeu'
+
+        mean_field_model.theano_reset()
+        mean_field_model.clear_unlocked_histories()
+        tidx = shim.getT().lscalar('tidx')
+        logL_graph, upds = mean_field_model.loglikelihood(tidx, tidx+mbatch_size)
+        logger.info("Compiling Theano loglikelihood")
+        logL_step = shim.gettheano().function([tidx], logL_graph,
+                                              updates=upds)
+        logger.info("Done compilation.")
+        mean_field_model.theano_reset()
+        def logL_fn(model):
+            mean_field_model.clear_unlocked_histories()
+            return sum(logL_step(i)
+                       for i in range(burnin_idx, stop_idx, mbatch_size))
+    else:
+        def logL_fn(model):
+            return mean_field_model.loglikelihood(burnin_idx, stop_idx-1)[0]
+
+    param_sweep.set_function(logL_fn, 'log $L$')
 
     ippclient = sinn.get_ipp_client(ipp_profile, ipp_url_file)
 
@@ -950,7 +868,17 @@ def plot_likelihood(loglikelihood_filename = None,
 ###########################
 
 if __name__ == '__main__':
-    generate_activity(4)
+    _init_logging_handlers()
+    #load_theano()
+    #generate_activity(4)
+    likelihood_sweep(('w', (0,0)),
+                     ('τ_m', (1,)),
+                     fineness=1,
+                     input_filename = 'fsgif_4s_sin-input_hi-res.dat',
+                     output_filename = 'fsgif_4s_sin-input_loglikelihood.data')
+                     #recalculate = recalculate,
+                     #ipp_url_file = ipp_url_file,
+                     #ipp_profile = ipp_profile
 
 ##########################
 # cli interface
@@ -958,14 +886,20 @@ if __name__ == '__main__':
 
 try:
     import click
+    import multiprocessing
 except ImportError:
     pass
 else:
+    ####
+    # Internal state variables
+    _prevent_exit = False
+
     ####
     # Root level cli entry point
     @click.group()
     @click.option('--theano/--no-theano', default=False)
     def cli(theano):
+        _init_logging_handlers()
         if theano:
             load_theano()
 
@@ -1002,24 +936,65 @@ else:
     def compute():
         pass
 
+    cli.add_command(compute)
+
+    def _isindex(s):
+        idxchars = set('0123456789,()[]')
+        return all((c in idxchars) for c in s)
+    def _parseindex(s):
+        idxstr = s.replace('[', '(').replace(']', ')')
+        assert(all(c in idxchars[:11]) for c in idxstr[1:-1])
+            # Apart from first & last characters, only numbers or commas
+        assert(idxstr[0] != ')' and idxstr[-1] != '(')
+        if idxstr[0] != '(':
+            idxstr = '(' + idxstr
+        if idxstr[-1] != ')':
+            idxstr = idxstr + ')'
+        if idxstr[-2] != ',':
+            idxstr = idxstr[:-1] + ',)'
+        return eval(idxstr)
+
     @click.command()
-    @click.argument('param1')
-    @click.argument('param2')
+    @click.argument('params', nargs=-1)
+    @click.option('--input', default="")
     @click.option('--output', default="")
     @click.option('--fineness', default=1)
     @click.option('--recalculate/--use-saved', default=False)
     @click.option('--ipp_url_file', default="")
     @click.option('--ipp_profile', default="")
-    def loglikelihood(param1, param2, fineness,
+    def loglikelihood(params,
+                      input,
                       output,
+                      fineness,
                       recalculate,
                       ipp_url_file, ipp_profile):
+        if len(params) < 2:
+            raise ValueError("You must provide at least 2 parameters to sweep.")
+        param1str = params[0]
+        if _isindex(params[1]):
+            param1idx = _parseindex(params[1])
+            if len(params) < 3:
+                raise ValueError("You must provide at least 2 parameters to sweep.")
+            i = 2
+        else:
+            param1idx = None
+            i = 1
+        param2str = params[i]
+        if _isindex(params[i+1]):
+            param2idx = _parseindex(params[i+1])
+        else:
+            param2idx = None
+        input = input if input is not "" else None
         output = output if output is not "" else None
         ipp_url_file = ipp_url_file if ipp_url_file is not "" else None
         ipp_profile = ipp_profile if ipp_profile is not "" else None
 
-        return likelihood_sweep(param1, param2, fineness,
-                                mean_field_model = None,
+        #mfmodel = derive_mf_model_from_spikes(input)
+
+        return likelihood_sweep((param1str, param1idx),
+                                (param2str, param2idx),
+                                fineness,
+                                input_filename = input,
                                 output_filename = output,
                                 recalculate = recalculate,
                                 ipp_url_file = ipp_url_file,
@@ -1029,9 +1004,19 @@ else:
 
     ####
     # Plotting commands
-    @click.group()
+
+    @click.group(chain=True)
     def plot():
         pass
+
+    cli.add_command(plot)
+
+    @plot.resultcallback()
+    def show_plots(retvals):
+        """
+        Prevent the script from exiting immediately, which would remove plots.
+        """
+        input("Press any key to exit.")
 
     # TODO: Allow more options for plotting likelihood
     @click.command()
@@ -1039,8 +1024,10 @@ else:
     def likelihood(input):
         if input == "":
             input = None
-        return plot_likelihood(loglikelihood_filename = input,
-                               ellipse = None,
-                               true_params = None)
+        kwargs = {}
+        plot_likelihood(loglikelihood_filename = input,
+                        ellipse = None,
+                        true_params = None)
+        return
 
     plot.add_command(likelihood)
