@@ -782,7 +782,6 @@ class GIF_mean_field(models.Model):
                     break
 
     def loglikelihood(self, start, end):
-        logger.info("Producing the likelihood graph.")
 
         ####################
         # Some hacks to get around current limitations
@@ -813,6 +812,8 @@ class GIF_mean_field(models.Model):
             return [cum_logL], shim.get_updates()
 
         if shim.config.use_theano:
+            logger.info("Producing the likelihood graph.")
+
             # FIXME np.float64 -> shim.floatX or sinn.floatX
             logL, upds = shim.gettheano().scan(logLstep,
                                                sequences = shim.getT().arange(startidx, endidx+1),
@@ -829,7 +830,7 @@ class GIF_mean_field(models.Model):
             # TODO: Remove this branch once shim.scan is implemented
             logL = 0
             for t in np.arange(startidx, endidx+1):
-                logL = logLstep(t)[0][0]
+                logL = logLstep(t, logL)[0][0]
             upds = shim.get_updates()
 
             return logL, upds

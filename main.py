@@ -278,15 +278,15 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
 def load_spikes(filename=None):
     global loaded, filenames
 
-    # Temporarily unload Theano since it isn't supported by spike history
-    use_theano = shim.config.use_theano
-    shim.load(load_theano=False)
-
     if 'spiking model' in loaded:
         return filenames['spiking model']
 
     if filename is None:
         filename = _BASENAME + "_spikes.dat"
+
+    # Temporarily unload Theano since it isn't supported by spike history
+    use_theano = shim.config.use_theano
+    shim.load(load_theano=False)
 
     logger.info("Checking for precomputed data...")
     try:
@@ -430,12 +430,12 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
 
 def compute_spike_activity(filename=None):
 
+    if 'spike activity' in loaded:
+        return loaded['spike activity']
+
     # Temporarily unload Theano since it isn't supported by spike history
     use_theano = shim.config.use_theano
     shim.load(load_theano=False)
-
-    if 'spike activity' in loaded:
-        return loaded['spike activity']
 
     load_spikes(filename)
     shist = loaded['spiking model'].s
@@ -727,11 +727,12 @@ def likelihood_sweep(param1, param2, fineness,
     mbatch_size=2
     burnin_idx = mean_field_model.get_t_idx(burnin)
     stop_idx = mean_field_model.get_t_idx(burnin+data_len)
-    if shim.config.use_theano:
-        # HACK: Workaround for issue with `sinn`
-        loaded['spiking model'].λ.name = 'spikeλ'
-        loaded['spiking model'].u.name = 'spikeu'
 
+    # HACK: Workaround for issue with `sinn`
+    loaded['spiking model'].λ.name = 'spikeλ'
+    loaded['spiking model'].u.name = 'spikeu'
+
+    if shim.config.use_theano:
         mean_field_model.theano_reset()
         mean_field_model.clear_unlocked_histories()
         tidx = shim.getT().lscalar('tidx')
@@ -941,7 +942,7 @@ else:
     def _isindex(s):
         idxchars = set('0123456789,()[]')
         return all((c in idxchars) for c in s)
-    def _parseindex(s):
+    def _parsetuple(s):
         idxstr = s.replace('[', '(').replace(']', ')')
         assert(all(c in idxchars[:11]) for c in idxstr[1:-1])
             # Apart from first & last characters, only numbers or commas
@@ -958,7 +959,7 @@ else:
     @click.argument('params', nargs=-1)
     @click.option('--input', default="")
     @click.option('--output', default="")
-    @click.option('--fineness', default=1)
+    @click.option('--fineness', default="")
     @click.option('--recalculate/--use-saved', default=False)
     @click.option('--ipp_url_file', default="")
     @click.option('--ipp_profile', default="")
@@ -972,7 +973,7 @@ else:
             raise ValueError("You must provide at least 2 parameters to sweep.")
         param1str = params[0]
         if _isindex(params[1]):
-            param1idx = _parseindex(params[1])
+            param1idx = _parsetuple(params[1])
             if len(params) < 3:
                 raise ValueError("You must provide at least 2 parameters to sweep.")
             i = 2
@@ -981,11 +982,13 @@ else:
             i = 1
         param2str = params[i]
         if _isindex(params[i+1]):
-            param2idx = _parseindex(params[i+1])
+            param2idx = _parsetuple(params[i+1])
         else:
             param2idx = None
         input = input if input is not "" else None
         output = output if output is not "" else None
+        fineness = _parsetuple(fineness) if fineness != "" else (1,)
+        fineness = fineness if len(fineness) > 1 else fineness[0]
         ipp_url_file = ipp_url_file if ipp_url_file is not "" else None
         ipp_profile = ipp_profile if ipp_profile is not "" else None
 
