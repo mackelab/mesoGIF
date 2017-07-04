@@ -813,7 +813,7 @@ class GIF_mean_field(models.Model):
                 else:
                     break
 
-    def loglikelihood(self, start, end):
+    def loglikelihood(self, start, stop):
 
         ####################
         # Some hacks to get around current limitations
@@ -829,7 +829,7 @@ class GIF_mean_field(models.Model):
         #####################
 
         startidx = self.get_t_idx(start)
-        endidx = self.get_t_idx(end)
+        stopidx = self.get_t_idx(stop)
         N = self.params.N
 
         def logLstep(tidx, cum_logL):
@@ -844,12 +844,12 @@ class GIF_mean_field(models.Model):
 
             return [cum_logL], shim.get_updates()
 
-        if shim.config.use_theano:
+        if shim.is_theano_object([self.nbar, self.params, self.n]):
             logger.info("Producing the likelihood graph.")
 
             # FIXME np.float64 -> shim.floatX or sinn.floatX
             logL, upds = shim.gettheano().scan(logLstep,
-                                               sequences = shim.getT().arange(startidx, endidx+1),
+                                               sequences = shim.getT().arange(startidx, stopidx),
                                                outputs_info = np.float64(0))
 
             self.apply_updates(upds)
@@ -862,7 +862,7 @@ class GIF_mean_field(models.Model):
         else:
             # TODO: Remove this branch once shim.scan is implemented
             logL = 0
-            for t in np.arange(startidx, endidx+1):
+            for t in np.arange(startidx, stopidx):
                 logL = logLstep(t, logL)[0][0]
             upds = shim.get_updates()
 
@@ -1058,13 +1058,14 @@ class GIF_mean_field(models.Model):
         # TODO: update m_0 with n(t)
         return shim.concatenate(
             ( self.n[tidx_n-1][np.newaxis,:],
-              ((1 - self.P_λ[tidx_Pλ-1][:-1]) * self.m[tidx_m-1][:-1]) ),
+              ((1 - self.P_λ._data[tidx_Pλ-1][:-1]) * self.m[tidx_m-1][:-1]) ),
             axis=-2 )
+            # HACK: Index P_λ data directly to avoid triggering it's computational udate before v_fn
 
     def P_Λ_fn(self, t):
         """p.53, line 28"""
         tidx_z = self.z.get_t_idx(t)
-        z = self.z[tidx_z-1]
+        z = self.z._data[tidx_z-1] # Hack: Don't trigger computation of z 'up to' t-1
         Z = self.Z[t]
         return shim.switch( Z + z > 0,
                             ( (self.Y[t] + self.Pfree[t]*z)
@@ -1100,6 +1101,7 @@ class GIF_mean_field(models.Model):
         # TODO: ensure that m can be used as single time buffer, perhaps
         #       by merging the second line with m_fn update ?
         return ( (1 - self.Pfree[tidx_P-1]) * self.x[tidx_x-1]
-                 + (1 - self.P_λ[tidx_Pλ-1][-1])*self.m[tidx_m-1][-1] )
+                 + (1 - self.P_λ._data[tidx_Pλ-1][-1])*self.m._data[tidx_m-1][-1] )
+            # HACK: Index P_λ, m _data directly to avoid triggering it's computational udate before v_fn
 
 
