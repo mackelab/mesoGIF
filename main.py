@@ -78,7 +78,7 @@ compiled = {}
 ###########
 # Step sizes
 spike_dt = 0.0002
-mf_dt = 0.001
+mf_dt = 0.03
 ###########
 
 def get_params():
@@ -265,6 +265,9 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
     Ahist = create_activity_history(activity_history, input_history, datalen, model_params)
 
     Ihist, rndstream = create_input_history(input_history, Ahist, model_params)
+
+    # HACK Required b/c mf_dt > delay
+    model_params.Δ.set_value(np.clip(model_params.Δ.get_value(), mf_dt, None))
 
     # GIF spiking model
     mf_model = gif.GIF_mean_field(model_params, Ahist, Ihist, rndstream,
@@ -793,9 +796,10 @@ def plot_spike_activity(filename=None):
         compute_spike_activity(filename)
 
     Ahist = loaded['spike activity']['Ahist']
+    window_bin_width = max(int(np.rint(0.01 / mf_dt)), 1)
 
     plt.title("Activity (summed spikes, smoothed, 10ms window)")
-    anlz.plot(anlz.smooth(Ahist, 10), label='A (spikes)', alpha=0.7)
+    anlz.plot(anlz.smooth(Ahist, window_bin_width), label='A (spikes)', alpha=0.7)
     plt.legend()
 
 

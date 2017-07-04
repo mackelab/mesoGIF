@@ -645,9 +645,12 @@ class GIF_mean_field(models.Model):
             # TODO: Don't remove dependence on self.param.N
         self.n.lock()
 
+        # HACK Everything below
         self.A_Δ.set()
-        self.A_Δ._original_data.set_value(self.A_Δ._data.eval())  # HACK
+        self.A_Δ._original_data.set_value(self.A_Δ._data.eval())
         self.A_Δ._data = self.A_Δ._original_data
+        self.A_Δ._original_tidx.set_value(self.A_Δ._cur_tidx.eval())
+        self.A_Δ._cur_tidx = self.A_Δ._original_tidx
         self.A_Δ.lock()
 
     def get_t_idx(self, t):
@@ -672,8 +675,13 @@ class GIF_mean_field(models.Model):
         max_time: float
             Maximum allowable memory time, in seconds.
         """
-        T = float(max_time)
-        while (kernel.eval(T) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
+        def evalT(x):
+            return (x.get_value() if shim.isshared(x)
+                    else x.eval() if shim.is_theano_variable(x)
+                    else x)
+
+        T = float(max_time // self.A.dt * self.A.dt)  # make sure T is a multiple of dt
+        while (evalT(kernel.eval(T)) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
             T -= self.A.dt
 
         T = max(T, 5*self.params.τ_m.get_value().max(), self.A.dt)
@@ -702,11 +710,26 @@ class GIF_mean_field(models.Model):
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
         self.θ_dis.set()
+        # HACK θ_dis updates should not be part of the loglikelihood's computational graph
+        #      but 'already there'
+        if shim.is_theano_object(self.θ_dis._data):
+            if self.θ_dis._original_data in shim.config.theano_updates:
+                #self.θ_dis._data = shim.config.theano_updates[self.θ_dis._original_data]
+                del shim.config.theano_updates[self.θ_dis._original_data]
+            if self.θ_dis._original_tidx in shim.config.theano_updates:
+                #self.θ_dis._cur_tidx = shim.config.theano_updates[self.θ_dis._original_tidx]
+                del shim.config.theano_updates[self.θ_dis._original_tidx]
 
         # TODO: Use operations
         self.θtilde_dis = Series(self.θ_dis, 'θtilde_dis',)
-        # DEBUG (was lambda)
-        # HACK θ_dis._data should be θ_dis
+        # HACK Proper way to ensure this would be to specify no. of bins (instead of tn) to history constructor
+        if len(self.θ_dis) != len(self.θtilde_dis):
+            self.θtilde_dis._tarr = copy.copy(self.θ_dis._tarr)
+            self.θtilde_dis._original_data.set_value(shim.zeros_like(self.θ_dis._original_data.get_value()))
+            self.θtilde_dis._data = self.θtilde_dis._original_data
+            self.θtilde_dis.tn = self.θtilde_dis._tarr[-1]
+            self.θtilde_dis._unpadded_length = len(self.θtilde_dis._tarr)
+        # HACK θ_dis._data should be θ_dis; then this can be made a lambda function
         def θtilde_upd_fn(t):
             tidx = self.θ_dis.get_t_idx(t)
             return self.params.Δu * (1 - shim.exp(-self.θ_dis._data[tidx]/self.params.Δu) ) / self.params.N
@@ -718,6 +741,15 @@ class GIF_mean_field(models.Model):
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
         self.θtilde_dis.set()
+        # HACK θ_dis updates should not be part of the loglikelihood's computational graph
+        #      but 'already there'
+        if shim.is_theano_object(self.θtilde_dis._data):
+            if self.θtilde_dis._original_data in shim.config.theano_updates:
+                #self.θtilde_dis._data = shim.config.theano_updates[self.θtilde_dis._original_data]
+                del shim.config.theano_updates[self.θtilde_dis._original_data]
+            if self.θtilde_dis._original_tidx in shim.config.theano_updates:
+                #self.θ_dis._cur_tidx = shim.config.theano_updates[self.θ_dis._original_tidx]
+                del shim.config.theano_updates[self.θtilde_dis._original_tidx]
 
         ## Initialize variables that are defined through an ODE
         for series in [self.n, self.m, self.u, self.v, self.λ, self.P_λ]:
@@ -804,7 +836,8 @@ class GIF_mean_field(models.Model):
             p = sinn.clip_probabilities(self.nbar[tidx+self.nbar.t0idx] / self.params.N)
             n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
 
-            cum_logL += ( -shim.log(shim.factorial(n, exact=False))
+            cum_logL += ( #-shim.log(shim.factorial(n, exact=False))
+                        -n*shim.log(n) + n
                         -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
                         + (N-n)*shim.log(1-p)
                         ).sum()
@@ -924,12 +957,12 @@ class GIF_mean_field(models.Model):
 
     def Pfree_fn(self, t):
         """p. 53, line 9"""
-        tidx_λ = self.λfree.get_t_idx(t)
-        return 1 - shim.exp(-0.5 * (self.λfree[tidx_λ-1] + self.λfree[tidx_λ]) * self.Pfree.dt)
-
-    # def λfree_fn(self, t):
-    #     """p. 53, line 10"""
-    #     return self.λtildefree[t]
+        tidx_λ = self.λfree.get_t_idx(t,)
+        self.λfree.compute_up_to(tidx_λ)
+            # HACK: force Theano to compute up to tidx_λ first
+            #       This is required because of the hack in History.compute_up_to
+            #       which assumes only one update per history is required
+        return 1 - shim.exp(-0.5 * (self.λfree[tidx_λ-1] + self.λfree[tidx_λ] * self.Pfree.dt) )
 
     def X_fn(self, t):
         """p. 53, line 12"""
@@ -973,6 +1006,7 @@ class GIF_mean_field(models.Model):
     def P_λ_fn(self, t):
         """p.53, line 19"""
         tidx_λ = self.λ.get_t_idx(t)
+        self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
         P_λ = 0.5 * (self.λ[tidx_λ][:-1] + self.λ[tidx_λ-1][:-1]) * self.P_λ.dt
         return shim.switch(P_λ <= 0.01,
                            P_λ,
