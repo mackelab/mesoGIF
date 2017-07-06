@@ -653,14 +653,14 @@ class GIF_mean_field(models.Model):
         self.A_Δ._cur_tidx = self.A_Δ._original_tidx
         self.A_Δ.lock()
 
-    def get_t_idx(self, t):
+    def get_t_idx(self, t, allow_rounding=False):
         """
         Returns the time index corresponding to t, with 0 corresponding to t0.
         """
         if shim.istype(t, 'int'):
             return t
         else:
-            return self.A.get_t_idx(t) - self.A.t0idx
+            return self.A.get_t_idx(t, allow_rounding) - self.A.t0idx
     def index_interval(self, Δt):
         return self.A.index_interval(Δt)
 
@@ -680,8 +680,15 @@ class GIF_mean_field(models.Model):
                     else x.eval() if shim.is_theano_variable(x)
                     else x)
 
+        if shim.is_theano_object(kernel.eval(0)):
+            t = shim.getT().dscalar('t')
+            kernelfn = shim.gettheano().function([t], kernel.eval(t))
+        else:
+            kernelfn = lambda t: kernel.eval(t)
+
         T = float(max_time // self.A.dt * self.A.dt)  # make sure T is a multiple of dt
-        while (evalT(kernel.eval(T)) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
+        #while (evalT(kernel.eval(T)) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
+        while (kernelfn(T) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
             T -= self.A.dt
 
         T = max(T, 5*self.params.τ_m.get_value().max(), self.A.dt)
@@ -837,8 +844,10 @@ class GIF_mean_field(models.Model):
             n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
 
             cum_logL += ( #-shim.log(shim.factorial(n, exact=False))
-                        -n*shim.log(n) + n
-                        -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
+                        #-n*shim.log(n) + n
+                        #-(N-n)*shim.log(N - n) + N-n
+                        -shim.gammaln(n+1) - shim.gammaln(N-n+1)
+                        + n*shim.log(p)
                         + (N-n)*shim.log(1-p)
                         ).sum()
 

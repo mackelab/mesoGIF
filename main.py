@@ -29,6 +29,7 @@ import sinn.models.noise as noise
 import sinn.iotools as io
 import sinn.analyze as anlz
 import sinn.analyze.sweep as sweep
+from sinn.analyze.heatmap import HeatMap
 
 ############################
 # Model import
@@ -39,6 +40,9 @@ import fsgif_model as gif
 # Basic configuration
 # Sets logger, default filename and whether to use Theano
 ############################
+
+#import os
+#os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -78,7 +82,7 @@ compiled = {}
 ###########
 # Step sizes
 spike_dt = 0.0002
-mf_dt = 0.03
+mf_dt = 0.001
 ###########
 
 def get_params():
@@ -110,7 +114,8 @@ def get_params():
                                   # Exc: 3 ms, Inh: 6 ms
         # Adaptation parameters   (p.55)
         J_θ    = (1.0, 0),        # Integral of adaptation kernel θ (mV s)
-        τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
+        τ_θ    = (0.2, 0.001)
+        #τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
                                   # since strength is zero; we just set a value != 0 to avoid dividing by 0
     )
     memory_time = 0.553  # Adjust according to τ
@@ -300,6 +305,7 @@ def load_spikes(filename=None):
     except FileNotFoundError:
         try:
             fn, ext = os.path.splitext(filename)
+            ext = ext if ext != "" else ".sir"
             shist = histories.Spiketrain.from_raw(io.loadraw(fn + "_spikes" + ext))
             Ihist = histories.Series.from_raw(io.loadraw(fn + "_input" + ext))
             loaded['spiking model'] = init_spiking_model(shist, Ihist)
@@ -543,8 +549,16 @@ def make_loglikelihood_step(filename=None):
             dellist.append(h)
     for h in dellist:
         del sinn.inputs[h]
+
+    # Extreme HACK
+    mfmodelT.θ_dis.locked = True
+    mfmodelT.θtilde_dis.locked = True
+
     # End hacks
     #####################
+
+    mfmodelT.theano_reset()
+    mfmodelT.clear_unlocked_histories()
 
     #tidx = shim.getT().scalar('tidx', dtype='int32')
     tvar = shim.getT().scalar('t', dtype='float32')
@@ -678,14 +692,15 @@ def likelihood_sweep(param1, param2, fineness,
         output_filename = _BASENAME + '_loglikelihood' + '.dat'
 
     # TODO: clean up / make treatment of mfmodel consistent with other functions
-    #if mean_field_model is None:
-    #    mean_field_model = _BASENAME + '.dat'
-    mean_field_model = derive_mf_model_from_spikes(input_filename)
+    #if mfmodel is None:
+    #    mfmodel = _BASENAME + '.dat'
+    mfmodel = derive_mf_model_from_spikes(input_filename)
+    print(mfmodel.u.shape)  # DEBUG
 
-    if isinstance(mean_field_model, str):
+    if isinstance(mfmodel, str):
         try:
             # Try to load precomputed data
-            mean_field_model = io.load(_filename)
+            mfmodel = io.load(_filename)
         except FileNotFoundError:
             raise FileNotFoundError("Unable to find data file {}. To create one, run "
                                     "`generate` – this is required to compute the likelihood."
@@ -701,13 +716,11 @@ def likelihood_sweep(param1, param2, fineness,
             return loglikelihood
 
     logger.info("Computing log likelihood...")
-    Ihist = mean_field_model.I_ext
+    Ihist = mfmodel.I_ext
 
     # Construct the arrays of parameters to try
     #fineness = 1#75
-    burnin = 0.5
-    data_len = 3.2
-    param_sweep = sweep.ParameterSweep(mean_field_model)
+    param_sweep = sweep.ParameterSweep(mfmodel)
     #J_sweep = sweep.linspace(-1, 10, fineness)          # wide
     #τ_sweep = sweep.logspace(0.0005, 0.5, fineness)     # wide
     #J_sweep = sweep.linspace(1, 5, fineness)  #3, 5
@@ -722,36 +735,36 @@ def likelihood_sweep(param1, param2, fineness,
     param_sweep.add_param(param1[0], idx=param1[1], axis_stops=param1_stops)
     param_sweep.add_param(param2[0], idx=param2[1], axis_stops=param2_stops)
 
-    # param_sweep.set_function(mean_field_model.get_loglikelihood(start=burnin,
+    # param_sweep.set_function(mfmodel.get_loglikelihood(start=burnin,
     #                                                             stop=burnin+data_len),
     #                          'log $L$')
 
     # HACK: Defining the logL function with batches instead of one scan
     mbatch_size=2
-    burnin_idx = mean_field_model.get_t_idx(burnin)
-    stop_idx = mean_field_model.get_t_idx(burnin+data_len)
+    burnin_idx = mfmodel.get_t_idx(burnin, allow_rounding=True)
+    stop_idx = mfmodel.get_t_idx(burnin+datalen, allow_rounding=True)
 
     # HACK: Workaround for issue with `sinn`
     loaded['spiking model'].λ.name = 'spikeλ'
     loaded['spiking model'].u.name = 'spikeu'
 
     if shim.config.use_theano:
-        mean_field_model.theano_reset()
-        mean_field_model.clear_unlocked_histories()
+        mfmodel.theano_reset()
+        mfmodel.clear_unlocked_histories()
         tidx = shim.getT().lscalar('tidx')
-        logL_graph, upds = mean_field_model.loglikelihood(tidx, tidx+mbatch_size)
+        logL_graph, upds = mfmodel.loglikelihood(tidx, tidx+mbatch_size)
         logger.info("Compiling Theano loglikelihood")
         logL_step = shim.gettheano().function([tidx], logL_graph,
                                               updates=upds)
         logger.info("Done compilation.")
-        mean_field_model.theano_reset()
+        mfmodel.theano_reset()
         def logL_fn(model):
-            mean_field_model.clear_unlocked_histories()
+            mfmodel.clear_unlocked_histories()
             return sum(logL_step(i)
                        for i in range(burnin_idx, stop_idx, mbatch_size))
     else:
         def logL_fn(model):
-            return mean_field_model.loglikelihood(burnin_idx, stop_idx-1)[0]
+            return mfmodel.loglikelihood(burnin_idx, stop_idx-1)[0]
 
     param_sweep.set_function(logL_fn, 'log $L$')
 
@@ -779,9 +792,12 @@ def likelihood_sweep(param1, param2, fineness,
 # Plotting
 ###########################
 
-def plot_raster(burnin, datalen, filename=None):
+def plot_raster(burnin=None, datalen=None, filename=None):
     load_spikes(filename)
     spikemodel = loaded['spiking model']
+
+    burnin = burnin if burnin != None else 0
+    datalen = datalen if datalen != None else spikemodel.s.tn
 
     plt.title("Generated spikes")
     anlz.plot(spikemodel.s, label="Population",
@@ -823,8 +839,8 @@ def plot_likelihood(loglikelihood_filename = None,
     **kwargs:
         These are passed on to analyze.plot.
     """
-    # TODO: environment variable or get path from sinn path
-    plt.style.use('../sinn/sinn/analyze/stylelib/mackelab_default.mplstyle')
+    sinnpath = os.path.dirname(sinn.__file__)
+    plt.style.use(sinnpath + '/analyze/stylelib/mackelab_default.mplstyle')
 
     if loglikelihood_filename is None:
         loglikelihood_filename = _BASENAME + '_loglikelihood' + '.dat'
@@ -833,7 +849,10 @@ def plot_likelihood(loglikelihood_filename = None,
         # See if the loglikelihood has already been computed
         loglikelihood = io.load(loglikelihood_filename)
     except:
-        raise RuntimeError("Unable to load loglikelihood file '{}'".format(loglikelihood_filename))
+        try:
+            loglikelihood = HeatMap.from_raw(io.loadraw(loglikelihood_filename))
+        except:
+            raise RuntimeError("Unable to load loglikelihood file '{}'".format(loglikelihood_filename))
 
     # Convert to the likelihood. We first make the maximum value 0, to avoid
     # underflows when computing the exponential
@@ -891,7 +910,6 @@ if __name__ == '__main__':
 
 try:
     import click
-    import multiprocessing
 except ImportError:
     pass
 else:
@@ -918,19 +936,19 @@ else:
 
     # TODO: Specify datalen with units (e.g. 4s or 300ms)
     @click.command()
-    @click.option('--datalen', type=float)
-    @click.option('--filename', default="")
+    @click.option('--datalen', type=float, help="Amount of data to generate, in seconds")
+    @click.option('--output', default="")
     @click.option('--save/--no-save', default=True)
-    def spikes(datalen, filename, save):
-        return generate_spikes(datalen, filename, save)
+    def spikes(datalen, output, save):
+        return generate_spikes(datalen, output, save)
 
     # TODO: Specify datalen with units (e.g. 4s or 300ms)
     @click.command()
-    @click.option('--datalen', type=float)
-    @click.option('--filename', default="")
+    @click.option('--datalen', type=float, help="Amount of data to generate, in seconds")
+    @click.option('--output', default="")
     @click.option('--save/--nosave', default=True)
-    def activity(datalen, filename, save):
-        return generate_activity(datalen, filename, save)
+    def activity(datalen, output, save):
+        return generate_activity(datalen, output, save)
 
     generate.add_command(spikes)
     generate.add_command(activity)
@@ -959,11 +977,15 @@ else:
             idxstr = idxstr[:-1] + ',)'
         return eval(idxstr)
 
+    param_help = ()
+
     @click.command()
     @click.argument('params', nargs=-1)
     @click.option('--input', default="")
     @click.option('--output', default="")
     @click.option('--fineness', default="")
+    @click.option('--burnin', default=0.5)
+    @click.option('--datalen', default=3.4)
     @click.option('--recalculate/--use-saved', default=False)
     @click.option('--ipp_url_file', default="")
     @click.option('--ipp_profile', default="")
@@ -971,8 +993,21 @@ else:
                       input,
                       output,
                       fineness,
+                      burnin, datalen,
                       recalculate,
                       ipp_url_file, ipp_profile):
+        """
+        Params:
+        Parameters to sweep are given in the form
+
+        \b
+        param1 [idx1] param2 [idx2]
+
+        where 'param_' one of the model's parameters and 'idx_' is a tuple
+        indicating which component of that parameter to sweep; it may be
+        given with or without wrapping parenthesis (in the former case
+        they typically must be protected from the shell). 'idx_' can be omitted for scalar parameters.
+        """
         if len(params) < 2:
             raise ValueError("You must provide at least 2 parameters to sweep.")
         param1str = params[0]
@@ -1001,6 +1036,7 @@ else:
         return likelihood_sweep((param1str, param1idx),
                                 (param2str, param2idx),
                                 fineness,
+                                burnin = burnin, datalen = datalen,
                                 input_filename = input,
                                 output_filename = output,
                                 recalculate = recalculate,
@@ -1023,18 +1059,40 @@ else:
         """
         Prevent the script from exiting immediately, which would remove plots.
         """
+        plt.show()
         input("Press any key to exit.")
+
+    @click.command()
+    @click.option('--input', default="")
+    @click.option('--burnin', default="")
+    @click.option('--datalen', default="")
+    def raster(input, burnin, datalen):
+        burnin = burnin if burnin != "" else None
+        datalen = datalen if datalen != "" else None
+        plot_raster(burnin, datalen, input)
+
+    plot.add_command(raster)
 
     # TODO: Allow more options for plotting likelihood
     @click.command()
     @click.option('--input', default="")
-    def likelihood(input):
+    @click.option('--true', default="", help="Comma separated list of the parameters' true values.")
+    @click.option('--ellipse', default="", help="Comma separated list of multiples of the std dev to draw as ellipses.")
+    def likelihood(input, true, ellipse):
         if input == "":
             input = None
         kwargs = {}
+        if true != "":
+            true_params = tuple(float(x) for x in true.split(','))
+        else:
+            true_params = None
+        if ellipse != "":
+            ellipse = np.array([float(x) for x in ellipse.split(',')])
+        else:
+            ellipse = None
         plot_likelihood(loglikelihood_filename = input,
-                        ellipse = None,
-                        true_params = None)
+                        ellipse = ellipse,
+                        true_params = true_params)
         return
 
     plot.add_command(likelihood)
