@@ -114,8 +114,8 @@ def get_params():
                                   # Exc: 3 ms, Inh: 6 ms
         # Adaptation parameters   (p.55)
         J_θ    = (1.0, 0),        # Integral of adaptation kernel θ (mV s)
-        #τ_θ    = (0.2, 0.001)
-        τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
+        τ_θ    = (0.2, 0.001)
+        #τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
                                   # since strength is zero; we just set a value != 0 to avoid dividing by 0
     )
     memory_time = 0.553  # Adjust according to τ
@@ -477,7 +477,7 @@ def compute_spike_activity(filename=None, max_len=None):
                 hist._unpadded_length = idx - hist.t0idx + 1
                 hist._original_data = shim.shared(np.array(hist._original_data[:idx+1]))
                 hist._data = hist._original_data
-                hist._tarr = shim.shared(np.array(hist._tarr[:idx+1]))
+                hist._tarr = np.array(hist._tarr[:idx+1])
                 hist.tn = hist._tarr[-1]
 
     Ahist.lock()
@@ -719,7 +719,7 @@ def likelihood_sweep(param1, param2, fineness,
     # TODO: clean up / make treatment of mfmodel consistent with other functions
     #if mfmodel is None:
     #    mfmodel = _BASENAME + '.dat'
-    mfmodel = derive_mf_model_from_spikes(input_filename)
+    mfmodel = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
     print(mfmodel.u.shape)  # DEBUG
 
     if isinstance(mfmodel, str):
