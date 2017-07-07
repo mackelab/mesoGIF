@@ -41,8 +41,8 @@ import fsgif_model as gif
 # Sets logger, default filename and whether to use Theano
 ############################
 
-#import os
-#os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
+import os
+os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -114,8 +114,8 @@ def get_params():
                                   # Exc: 3 ms, Inh: 6 ms
         # Adaptation parameters   (p.55)
         J_θ    = (1.0, 0),        # Integral of adaptation kernel θ (mV s)
-        τ_θ    = (0.2, 0.001)
-        #τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
+        #τ_θ    = (0.2, 0.001)
+        τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
                                   # since strength is zero; we just set a value != 0 to avoid dividing by 0
     )
     memory_time = 0.553  # Adjust according to τ
@@ -314,7 +314,7 @@ def load_spikes(filename=None):
 
     if 'spiking model' in loaded:
         # The spiking model is considered the ground truth
-        loaded['true params'] = copy.deepcopy(loaded['spiking model'])
+        loaded['true params'] = copy.deepcopy(loaded['spiking model'].params)
 
     # Reload Theano if it was loaded when we entered the function
     shim.load(load_theano=use_theano)
@@ -437,7 +437,18 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
 # Data processing functions
 ###########################
 
-def compute_spike_activity(filename=None):
+def compute_spike_activity(filename=None, max_len=None):
+    """
+    Parameters
+    ----------
+    filename: str
+        (Optional) File name under which spikes and inputs are stored.
+    max_len: float
+        (Optional) Maximum length of data to keep. If the spikes data
+        is longer, the resulting activity and input arrays are truncated.
+        If specified as an integer, considered as a number of bins rather
+        than time units.
+    """
 
     if 'spike activity' in loaded:
         return loaded['spike activity']
@@ -447,7 +458,10 @@ def compute_spike_activity(filename=None):
     shim.load(load_theano=False)
 
     load_spikes(filename)
-    shist = loaded['spiking model'].s
+    try:
+        shist = loaded['spiking model'].s
+    except KeyError:
+        raise ValueError("The file spike file '{}' was not found.".format(filename))
 
     spikeAhist = anlz.mean(shist, shist.pop_slices) / shist.dt
     spikeAhist.name = "A (spikes)"
@@ -455,14 +469,25 @@ def compute_spike_activity(filename=None):
 
     # Subsample the activity and input
     Ahist = anlz.subsample(spikeAhist, np.rint(mf_dt / spike_dt).astype('int'))
-    Ahist.lock()
     Ihist = anlz.subsample(loaded['spiking model'].I_ext, np.rint(mf_dt / spike_dt).astype('int'))
+    if max_len is not None:
+        for hist in [Ahist, Ihist]:
+            idx = hist.get_t_idx(max_len)
+            if idx < len(hist._tarr) - 1:
+                hist._unpadded_length = idx - hist.t0idx + 1
+                hist._original_data = shim.shared(np.array(hist._original_data[:idx+1]))
+                hist._data = hist._original_data
+                hist._tarr = shim.shared(np.array(hist._tarr[:idx+1]))
+                hist.tn = hist._tarr[-1]
+
+    Ahist.lock()
     Ihist.lock()
 
     # Remove dependencies of the subsampled data on the original
     # (this is to workaround some of sinn's intricacies)
     sinn.inputs[Ahist].clear()
     sinn.inputs[Ihist].clear()
+
 
     loaded['spike activity'] = { 'Ahist': Ahist,
                                  'Ihist': Ihist }
@@ -471,12 +496,12 @@ def compute_spike_activity(filename=None):
     shim.load(load_theano=use_theano)
 
 
-def derive_mf_model_from_spikes(filename=None):
+def derive_mf_model_from_spikes(filename=None, max_len=None):
 
     if 'derived mf model' in loaded:
         return loaded['derived mf model']
 
-    compute_spike_activity(filename)
+    compute_spike_activity(filename, max_len)
 
     spikemodel = loaded['spiking model']
     Ahist = loaded['spike activity']['Ahist']
@@ -788,6 +813,41 @@ def likelihood_sweep(param1, param2, fineness,
 
     return loglikelihood
 
+def exploglikelihood(loglikelihood):
+    """
+    Return the likelihood, given the loglikelihood.
+
+    Parameters
+    ----------
+    loglikelihood: str, HeatMap
+        If a string, assumed to be a filename from which to load the heat map.
+    """
+    if loglikelihood is None:
+        filename = _BASENAME + '_loglikelihood' + '.dat'
+    if isinstance(loglikelihood, str):
+        filename = loglikelihood
+        try:
+            loglikelihood = io.load(filename)
+        except:
+            try:
+                loglikelihood = HeatMap.from_raw(io.loadraw(filename))
+            except:
+                raise RuntimeError("Unable to load loglikelihood file '{}'".format(loglikelihood_filename))
+    else:
+        assert(isinstance(loglikelihood, HeatMap))
+
+    # Convert to the likelihood. We first make the maximum value 0, to avoid
+    # underflows when computing the exponential
+    likelihood = (loglikelihood - loglikelihood.max()).apply_op("L", np.exp)
+
+    # Plot the likelihood
+    likelihood.cmap = 'viridis'
+    likelihood.set_ceil(likelihood.max())
+    likelihood.set_floor(0)
+    likelihood.set_norm('linear')
+
+    return likelihood
+
 ###########################
 # Plotting
 ###########################
@@ -842,27 +902,28 @@ def plot_likelihood(loglikelihood_filename = None,
     sinnpath = os.path.dirname(sinn.__file__)
     plt.style.use(sinnpath + '/analyze/stylelib/mackelab_default.mplstyle')
 
-    if loglikelihood_filename is None:
-        loglikelihood_filename = _BASENAME + '_loglikelihood' + '.dat'
+    # if loglikelihood_filename is None:
+    #     loglikelihood_filename = _BASENAME + '_loglikelihood' + '.dat'
 
-    try:
-        # See if the loglikelihood has already been computed
-        loglikelihood = io.load(loglikelihood_filename)
-    except:
-        try:
-            loglikelihood = HeatMap.from_raw(io.loadraw(loglikelihood_filename))
-        except:
-            raise RuntimeError("Unable to load loglikelihood file '{}'".format(loglikelihood_filename))
+    # try:
+    #     # See if the loglikelihood has already been computed
+    #     loglikelihood = io.load(loglikelihood_filename)
+    # except:
+    #     try:
+    #         loglikelihood = HeatMap.from_raw(io.loadraw(loglikelihood_filename))
+    #     except:
+    #         raise RuntimeError("Unable to load loglikelihood file '{}'".format(loglikelihood_filename))
 
-    # Convert to the likelihood. We first make the maximum value 0, to avoid
-    # underflows when computing the exponential
-    likelihood = (loglikelihood - loglikelihood.max()).apply_op("L", np.exp)
+    # # Convert to the likelihood. We first make the maximum value 0, to avoid
+    # # underflows when computing the exponential
+    # likelihood = (loglikelihood - loglikelihood.max()).apply_op("L", np.exp)
 
-    # Plot the likelihood
-    likelihood.cmap = 'viridis'
-    likelihood.set_ceil(likelihood.max())
-    likelihood.set_floor(0)
-    likelihood.set_norm('linear')
+    # # Plot the likelihood
+    # likelihood.cmap = 'viridis'
+    # likelihood.set_ceil(likelihood.max())
+    # likelihood.set_floor(0)
+    # likelihood.set_norm('linear')
+    likelihood = exploglikelihood(loglikelihood_filename)
     ax, cb = anlz.plot(likelihood)
         # analyze recognizes loglikelihood as a heat map, and plots accordingly
         # anlz.plot returns a tuple of all plotted objects. For heat maps there
@@ -881,7 +942,6 @@ def plot_likelihood(loglikelihood_filename = None,
         plt.axvline(true_params[0], c=color)
         plt.axhline(true_params[1], c=color)
 
-    plt.show(block=False)
     return
 
 
@@ -1059,7 +1119,7 @@ else:
         """
         Prevent the script from exiting immediately, which would remove plots.
         """
-        plt.show()
+        plt.show(block=False)
         input("Press any key to exit.")
 
     @click.command()
