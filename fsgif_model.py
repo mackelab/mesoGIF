@@ -628,6 +628,20 @@ class GIF_mean_field(models.Model):
         if self.A.locked:
             self.given_A()
 
+
+        # Used to fill the data by iterating
+        # FIXME: This is only required because of our abuse of shared variable updates
+        if shim.config.use_theano:
+            logger.info("Compiling advance function.")
+            tidx = shim.getT().iscalar()
+            self.remove_other_histories()  # HACK
+            self.clear_unlocked_histories()
+            self.theano_reset()
+            self.nbar[tidx + self.nbar.t0idx]  # Fills updates
+            self._advance_fn = shim.gettheano().function([tidx], [], updates=shim.get_updates())
+            self.theano_reset()
+            logger.info("Done.")
+
     def given_A(self):
         """Run this function when A is given data. It reverses the dependency
         n -> A to A -> n and fills the n array
@@ -820,11 +834,14 @@ class GIF_mean_field(models.Model):
                 else:
                     break
 
-    def loglikelihood(self, start, stop):
+    # FIXME: This is only required because of our abuse of shared variable updates
+    def advance(self, stop):
+        stopidx = self.nbar.get_t_idx(stop)
+        for i in range(self.nbar._original_tidx.get_value(), stopidx+1):
+            self._advance_fn
 
-        ####################
-        # Some hacks to get around current limitations
-
+    def remove_other_histories(self):
+        """HACK: Remove histories from sinn.inputs that are not in this model."""
         histnames = [h.name for h in self.history_set]
         dellist = []
         for h in sinn.inputs:
@@ -832,11 +849,19 @@ class GIF_mean_field(models.Model):
                 dellist.append(h)
         for h in dellist:
             del sinn.inputs[h]
+
+    def loglikelihood(self, start, batch_size):
+
+        ####################
+        # Some hacks to get around current limitations
+
+        self.remove_other_histories()
+
         # End hacks
         #####################
 
         startidx = self.get_t_idx(start)
-        stopidx = self.get_t_idx(stop)
+        stopidx = startidx + batch_size
         N = self.params.N
 
         def logLstep(tidx, cum_logL):
@@ -856,14 +881,18 @@ class GIF_mean_field(models.Model):
         if shim.is_theano_object([self.nbar, self.params, self.n]):
             logger.info("Producing the likelihood graph.")
 
-            # FIXME np.float64 -> shim.floatX or sinn.floatX
-            logL, upds = shim.gettheano().scan(logLstep,
-                                               sequences = shim.getT().arange(startidx, stopidx),
-                                               outputs_info = np.float64(0))
+            if batch_size == 1:
+                # No need for scan
+                logL, upds = logLstep(start, 0)
 
-            self.apply_updates(upds)
-                # Applying updates is essential to remove the temporary iteration variable
-                # scan introduces from the shim updates dictionary
+            else:
+                # FIXME np.float64 -> shim.floatX or sinn.floatX
+                logL, upds = shim.gettheano().scan(logLstep,
+                                                sequences = shim.getT().arange(startidx, stopidx),
+                                                outputs_info = np.float64(0))
+                self.apply_updates(upds)
+                    # Applying updates is essential to remove the temporary iteration variable
+                    # scan introduces from the shim updates dictionary
 
             logger.info("Likelihood graph complete")
 

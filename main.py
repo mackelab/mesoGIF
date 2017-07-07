@@ -41,8 +41,8 @@ import fsgif_model as gif
 # Sets logger, default filename and whether to use Theano
 ############################
 
-import os
-os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
+#import os
+#os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -765,7 +765,7 @@ def likelihood_sweep(param1, param2, fineness,
     #                          'log $L$')
 
     # HACK: Defining the logL function with batches instead of one scan
-    mbatch_size=2
+    mbatch_size=1
     burnin_idx = mfmodel.get_t_idx(burnin, allow_rounding=True)
     stop_idx = mfmodel.get_t_idx(burnin+datalen, allow_rounding=True)
 
@@ -777,7 +777,7 @@ def likelihood_sweep(param1, param2, fineness,
         mfmodel.theano_reset()
         mfmodel.clear_unlocked_histories()
         tidx = shim.getT().lscalar('tidx')
-        logL_graph, upds = mfmodel.loglikelihood(tidx, tidx+mbatch_size)
+        logL_graph, upds = mfmodel.loglikelihood(tidx, mbatch_size)
         logger.info("Compiling Theano loglikelihood")
         logL_step = shim.gettheano().function([tidx], logL_graph,
                                               updates=upds)
@@ -789,7 +789,7 @@ def likelihood_sweep(param1, param2, fineness,
                        for i in range(burnin_idx, stop_idx, mbatch_size))
     else:
         def logL_fn(model):
-            return mfmodel.loglikelihood(burnin_idx, stop_idx-1)[0]
+            return mfmodel.loglikelihood(burnin_idx, stop_idx-1-burnin_idx)[0]
 
     param_sweep.set_function(logL_fn, 'log $L$')
 
