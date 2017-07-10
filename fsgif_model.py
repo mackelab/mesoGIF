@@ -789,6 +789,10 @@ class GIF_mean_field(models.Model):
         self.varθ.pad(max_mem)
         self.varθfree.pad(max_mem)
 
+        # >>>>> Extreme HACK, remove ASAP <<<<<
+        self.θ_dis.locked = True
+        self.θtilde_dis.locked = True
+        # <<<<<
 
         # Set initial values (make sure this is done after all padding is added)
 
@@ -837,8 +841,8 @@ class GIF_mean_field(models.Model):
     # FIXME: This is only required because of our abuse of shared variable updates
     def advance(self, stop):
         stopidx = self.nbar.get_t_idx(stop)
-        for i in range(self.nbar._original_tidx.get_value(), stopidx+1):
-            self._advance_fn
+        for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
+            self._advance_fn(i)
 
     def remove_other_histories(self):
         """HACK: Remove histories from sinn.inputs that are not in this model."""
