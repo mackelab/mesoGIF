@@ -131,7 +131,7 @@ class GIF_spiking(models.Model):
         self.Npops = len(N)
 
         # Model variables
-        self.RI_syn = Series(self.s, 'RI_syn',
+        self.RI_syn = Series(self.s, 'RI_syn', 
                              shape = (N.sum(), ))
         self.λ = Series(self.RI_syn, 'λ')
         self.varθ = Series(self.RI_syn, 'ϑ')
@@ -293,6 +293,61 @@ class GIF_spiking(models.Model):
             raise ValueError("Parameter {} has {} dimensions; can only expand "
                              "dimensions of 1d and 2d parameters."
                              .format(param.name, param.ndim))
+
+    def loglikelihood(self, start, batch_size):
+        # >>>>>>>>>>>>>> WARNING: Untested, incomplete <<<<<<<<<<<<<
+
+        #######################
+        # Some hacks to get around current limitations
+
+        self.remove_other_histories()
+
+        # End hacks
+        #####################
+
+        startidx = self.get_t_idx(start)
+        stopidx = startidx + batch_size
+        N = self.params.N
+
+        def logLstep(tidx, cum_logL):
+            # TODO: Don't use private _data variable
+            p = sinn.clip_probabilities(self.λ[tidx]*self.s.dt)
+            s = shim.cast(self.s._data.tocsr()[tidx+self.s.t0idx], 'int32')
+
+            # L = s*n - (1-s)*(1-p)
+            cum_logL += ( s*p - (1-p) + s*(1-p) ).sum()
+
+            return [cum_logL], shim.get_updates()
+
+        if shim.is_theano_object([self.nbar, self.params, self.n]):
+            raise NotImplementedError
+
+            logger.info("Producing the likelihood graph.")
+
+            if batch_size == 1:
+                # No need for scan
+                logL, upds = logLstep(start, 0)
+
+            else:
+                # FIXME np.float64 -> shim.floatX or sinn.floatX
+                logL, upds = shim.gettheano().scan(logLstep,
+                                                sequences = shim.getT().arange(startidx, stopidx),
+                                                outputs_info = np.float64(0))
+                self.apply_updates(upds)
+                    # Applying updates is essential to remove the temporary iteration variable
+                    # scan introduces from the shim updates dictionary
+
+            logger.info("Likelihood graph complete")
+
+            return logL[-1], upds
+        else:
+            # TODO: Remove this branch once shim.scan is implemented
+            logL = 0
+            for t in np.arange(startidx, stopidx):
+                logL = logLstep(t, logL)[0][0]
+            upds = shim.get_updates()
+
+            return logL, upd
 
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
@@ -642,6 +697,11 @@ class GIF_mean_field(models.Model):
             self.theano_reset()
             logger.info("Done.")
 
+
+        # HACK For propagating gradients without scan
+        #      Order must be consistent with return value of symbolic_update
+        self.statevars = [ self.λfree, self.λ, self.Pfree, self.P_λ, self.g, self.h, self.u, self.v, self.m, self.x, self.y, self.z ]
+
     def given_A(self):
         """Run this function when A is given data. It reverses the dependency
         n -> A to A -> n and fills the n array
@@ -840,7 +900,7 @@ class GIF_mean_field(models.Model):
 
     # FIXME: This is only required because of our abuse of shared variable updates
     def advance(self, stop):
-        stopidx = self.nbar.get_t_idx(stop)
+        stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
         for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
             self._advance_fn(i)
 
@@ -868,39 +928,57 @@ class GIF_mean_field(models.Model):
         stopidx = startidx + batch_size
         N = self.params.N
 
-        def logLstep(tidx, cum_logL):
-            p = sinn.clip_probabilities(self.nbar[tidx+self.nbar.t0idx] / self.params.N)
+        def logLstep(tidx, *args):
+            if shim.is_theano_object(tidx):
+                step_updates, input_vars, output_vars = self.symbolic_update(tidx, args[1:])
+                nbar = output_vars[self.nbar]
+            else:
+                nbar = self.nbar[tidx+self.nbar.t0idx]
+                updates = shim.get_updates()
+            p = sinn.clip_probabilities(nbar / self.params.N)
             n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
 
-            cum_logL += ( #-shim.log(shim.factorial(n, exact=False))
-                        #-n*shim.log(n) + n
-                        #-(N-n)*shim.log(N - n) + N-n
-                        -shim.gammaln(n+1) - shim.gammaln(N-n+1)
-                        + n*shim.log(p)
-                        + (N-n)*shim.log(1-p)
-                        ).sum()
+            cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
+                                   + n*shim.log(p)
+                                   + (N-n)*shim.log(1-p)
+                                  ).sum()
 
-            return [cum_logL], shim.get_updates()
+            return [cum_logL] + list(step_updates.values()), {}
+            # return [cum_logL], shim.get_updates()
 
-        if shim.is_theano_object([self.nbar, self.params, self.n]):
+        if shim.is_theano_object([self.nbar._data, self.params, self.n._data]):
             logger.info("Producing the likelihood graph.")
+
+            # Create the outputs_info list
+            # First element is the loglikelihood, subsequent are aligned with input_vars
+            outputs_info = [shim.cast(0, sinn.config.floatX)]
+            for hist in self.statevars:
+                outputs_info.append( hist._data[startidx + hist.t0idx - 1] )
 
             if batch_size == 1:
                 # No need for scan
-                logL, upds = logLstep(start, 0)
+                outputs, upds = logLstep(start, *outputs_info)
+                outputs[0] = [outputs[0]]
 
             else:
                 # FIXME np.float64 -> shim.floatX or sinn.floatX
-                logL, upds = shim.gettheano().scan(logLstep,
-                                                sequences = shim.getT().arange(startidx, stopidx),
-                                                outputs_info = np.float64(0))
+                outputs, upds = shim.gettheano().scan(logLstep,
+                                                      sequences = shim.getT().arange(startidx, stopidx),
+                                                      outputs_info = outputs_info)
+                                                      #outputs_info = np.float64(0))
+                # HACK Since we are still using shared variables for data
+                #for hist, new_data in outputs[1:]:
+                #    hist.update(slice(startidx+hist.t0idx, stopidx+hist.t0idx),
+                #                new_data)
+
                 self.apply_updates(upds)
-                    # Applying updates is essential to remove the temporary iteration variable
+                    # Applying updates is essential to remove the iteration variable
                     # scan introduces from the shim updates dictionary
 
             logger.info("Likelihood graph complete")
 
-            return logL[-1], upds
+            return outputs[0][-1], outputs[1:], upds
+                # logL = outputs[0]; outputs[1:] => statevars
         else:
             # TODO: Remove this branch once shim.scan is implemented
             logL = 0
@@ -909,8 +987,6 @@ class GIF_mean_field(models.Model):
             upds = shim.get_updates()
 
             return logL, upds
-
-
 
     def f(self, u):
         """Link function. Maps difference between membrane potential & threshold
@@ -1147,3 +1223,183 @@ class GIF_mean_field(models.Model):
             # HACK: Index P_λ, m _data directly to avoid triggering it's computational udate before v_fn
 
 
+    def symbolic_update(self, tidx, statevars):
+        """
+        Temorary fix to get symbolic updates. Eventually sinn should
+        be able to do this itself.
+        """
+        # T = shim.getT()
+
+        # def create_variable(hist):
+        #     data_tensor_broadcast = tuple([True if d==1 else 0 for d in hist.shape])
+        #     DataType = T.TensorType(sinn.config.floatX, data_tensor_broadcast)
+        #     return DataType(hist.name + '_0')
+
+        # λfree0 = create_variable(self.λfree)
+        # λ0 = create_variable(self.λ)
+        # Pfree0 = create_variable(self.Pfree)
+        # P_λ0 = create_variable(self.P_λ)
+        # g0 = create_variable(self.g)
+        # h0 = create_variable(self.h)
+        # u0 = create_variable(self.u)
+        # v0 = create_variable(self.v)
+        # m0 = create_variable(self.m)
+        # x0 = create_variable(self.x)
+        # y0 = create_variable(self.y)
+        # z0 = create_variable(self.z)
+
+        λfree0 = statevars[0]
+        λ0 = statevars[1]
+        Pfree0 = statevars[2]
+        P_λ0 = statevars[3]
+        g0 = statevars[4]
+        h0 = statevars[5]
+        u0 = statevars[6]
+        v0 = statevars[7]
+        m0 = statevars[8]
+        x0 = statevars[9]
+        y0 = statevars[10]
+        z0 = statevars[11]
+
+        # shared constants
+        tidx_n = tidx + self.n.t0idx
+
+        # yt
+        red_factor = shim.exp(-self.y.dt/self.params.τ_s)
+        yt = self.A_Δ[tidx+self.A_Δ.t0idx] + (y0 - self.A_Δ[tidx+self.A_Δ.t0idx]) * red_factor
+
+        # htot
+        red_factor_τm = shim.exp(-self.h_tot.dt/self.params.τ_m)
+        red_factor_τs = shim.exp(-self.h_tot.dt/self.params.τ_s)
+        h_tot = ( self.params.u_rest + self.params.R*self.I_ext[tidx+self.I_ext.t0idx] * (1 - red_factor_τm)
+                 + ( self.params.τ_m * (self.params.p * self.params.w) * self.params.N
+                       * (self.A_Δ[tidx+self.A_Δ.t0idx]
+                          + ( ( self.params.τ_s * red_factor_τs * ( yt - self.A_Δ[tidx+self.A_Δ.t0idx] )
+                                - red_factor_τm * (self.params.τ_s * yt - self.params.τ_m * self.A_Δ[tidx+self.A_Δ.t0idx]) )
+                              / (self.params.τ_s - self.params.τ_m) ) )
+                   ).sum(axis=-1) )
+
+        # ht
+        red_factor = shim.exp(-self.h.dt/self.params.τ_m.flatten() )
+        ht = ( (h0 - self.params.u_rest) * red_factor + h_tot )
+
+        # ut
+        red_factor = shim.exp(-self.u.dt/self.params.τ_m).flatten()[np.newaxis, ...]
+        ut = shim.concatenate(
+            ( self.params.u_r[..., np.newaxis, :],
+              ((u0[:-1] - self.params.u_rest[np.newaxis, ...]) * red_factor + h_tot[np.newaxis,...]) ),
+            axis=-2)
+
+        # gt
+        red_factor = shim.exp(- self.g.dt/self.params.τ_θ)
+        gt = ( g0 * red_factor
+                 + (1 - red_factor) * self.n[tidx_n-self.K] / (self.params.N * self.g.dt)
+                ).flatten()
+
+        # varθfree
+        red_factor = (self.params.J_θ * shim.exp(-self.memory_time/self.params.τ_θ)).flatten()
+        varθfree =  self.params.u_th + red_factor * gt
+
+        # varθ
+        K = self.u.shape[0]
+        varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
+                                axis=-2)
+                    - shim.addbroadcast(self.n[tidx_n-K]*self.θtilde_dis._data[K-1:K], -2) )[...,::-1,:]
+        varθ = self.θ_dis._data[:K] + varθfree + varθref
+
+        # λt
+        λt = self.f(ut - varθ) * self.ref_mask
+
+        # λfree
+        λfreet = self.f(ht - varθfree[0])
+
+        # Pfreet
+        Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet * self.Pfree.dt) )
+
+        # P_λt
+        P_λ_tmp = 0.5 * (λt[:-1] + λ0[:-1]) * self.P_λ.dt
+        P_λt = shim.switch(P_λ_tmp <= 0.01,
+                           P_λ_tmp,
+                           1 - shim.exp(-P_λ_tmp))
+        # mt
+        mt = shim.concatenate(
+            ( self.n[tidx_n-1][np.newaxis,:], ((1 - P_λ0[:-1]) * m0[:-1]) ),
+            axis=-2 )
+
+        # X
+        X = mt.sum(axis=-2)
+
+        # xt
+        xt = ( (1 - Pfree0) * x0 + (1 - P_λ0[-1])*m0[-1] )
+
+        # zt
+        zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + v0[0] )
+
+        # vt
+        vt = shim.concatenate(
+            ( shim.zeros(self.v.shape[:-1] + (1,), dtype=sinn.config.floatX),
+              ((1 - P_λt)**2 * v0 + P_λt * mt)[...,:-1] ),
+            axis=-1)
+
+        # W
+        Wref_mask = self.ref_mask[:self.m.shape[0],:]
+        W = (P_λt * mt * Wref_mask).sum(axis=-2)
+
+        # Y
+        Y = (P_λt * v0).sum(axis=-2)
+
+        # Z
+        Z = v0.sum(axis=-2)
+
+        # P_Λ
+        P_Λ = shim.switch( Z + z0 > 0,
+                           ( (Y + Pfreet*z0)
+                             / (shim.abs(Z + z0) + sinn.config.abs_tolerance) ),
+                           0 )
+
+        # nbar
+        nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
+
+        updates = OrderedDict((
+            (λfree0, λfreet),
+            (λ0, λt),
+            (Pfree0, Pfreet),
+            (P_λ0, P_λt),
+            (g0, gt),
+            (h0, ht),
+            (u0, ut),
+            (v0, vt),
+            (m0, mt),
+            (x0, xt),
+            (y0, yt),
+            (z0, zt)
+        ))
+
+        input_vars = OrderedDict(( (self.λfree, λfree0),
+                                   (self.λ, λ0),
+                                   (self.Pfree, Pfree0),
+                                   (self.P_λ, P_λ0),
+                                   (self.g, g0),
+                                   (self.h, h0),
+                                   (self.u, u0),
+                                   (self.v, v0),
+                                   (self.m, m0),
+                                   (self.x, x0),
+                                   (self.y, y0),
+                                   (self.z, z0) ))
+
+        output_vars = OrderedDict(( (self.λfree, λfreet),
+                                    (self.λ, λt),
+                                    (self.Pfree, Pfreet),
+                                    (self.P_λ, P_λt),
+                                    (self.g, gt),
+                                    (self.h, ht),
+                                    (self.u, ut),
+                                    (self.v, vt),
+                                    (self.m, mt),
+                                    (self.x, xt),
+                                    (self.y, yt),
+                                    (self.z, zt),
+                                    (self.nbar, nbar) ))
+
+        return updates, input_vars, output_vars

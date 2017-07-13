@@ -99,9 +99,11 @@ def get_params():
         u_rest = np.array((20.123, 20.362)),   # mV, p. 55
         p      = p,                    # Connection probability
         w      = ((0.176, -0.702),
+                 #((0.11, -0.702),
                   (0.176, -0.702)),    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
         τ_m    = (0.02, 0.02),    # s,  membrane time constant
+        #τ_m    = (0.02, 0.25),
         t_ref  = (0.004, 0.004),  # s,  absolute refractory period
         u_th   = (15, 15),        # mV, non-adapting threshold  (p.54)
         u_r    = (0, 0),          # mV, reset potential   (p. 54)
@@ -534,149 +536,69 @@ def derive_mf_model_from_spikes(filename=None, max_len=None):
 # Likelihood functions
 ###########################
 
-def compile_theano_loglikelihood():
-    global compiled
+# def get_sweep_param(name, index, fineness):
+#     # index is including so that ranges may depend on it
+#     if name == 'J_θ':
+#         return sweep.linspace(0, 3, fineness)
+#     elif name == 'τ_m':
+#         return sweep.logspace(0.003, 0.07, fineness)
+#     elif name == 'w':
+#         return sweep.linspace(-0.5, 0.5, fineness)
+#     else:
+#         raise NotImplementedError
 
-    logL = make_loglikelihood_graph2()
 
-    logger.info("Compiling loglikelihood graph")
-    compiled['logL'] = shim.gettheano().function([], [logL])
+# def batch_Lgrad(model, wrt, start, stop):
+#     """
+#     Parameters
+#     ----------
+#     model: sinn.Model instance
+
+#     wrt: list of Theano variables
+
+#     start, stop: indices
+#     """
+#     T = shim.getT()
+
+#     if not hasattr(model, 'statevars'):
+#         raise TypeError("The `batch_Lgrad` requires the model to "
+#                         "have a `statevars` attribute")
+#     #wrt = T.concatenate([x.flatten() for x in wrt])
+#     statevars = T.concatenate([x.flatten() for in model.statevars])
+
+#     J4 = T.zeros((statevars.shape[0], wrt.shape[0]))
+
+def compile_sgd(sgd, fitparams, mbatch_size, **kwargs):
+    """Patches the SGD module's compile function for scan-less gradients."""
+
+    #logL_graph, upds = mfmodel.loglikelihood(tidx, 1)
+    cost, cost_updates = sgd.get_substituted_cost_graph(fitparams, **kwargs)
+
+    logger.info("Compiling the minibatch cost function.")
+    # DEBUG (because on mini batches?)
+    onestepcost = theano.function([sgd.tidx], cost)
     logger.info("Done compilation.")
 
-    return compiled['logL']
+    logger.info("Calculating gradient updates.")
+    g1 = []
+    J2 = []
+    J3 = []
+    for sv in sgd.model.statevars:
+        g1.append( T.grad(cost, sv, consider_constant=sgd.model.statevars) )
+        J2.append( T.jacobian(sv, fitparams, consider_constant=sgd.model.statevars) )
+        J3.append( T.jacobian(sv, sgd.model.statevars, consider_constant=fitparams) )
+    logger.info("Done calculating gradient updates.")
 
-def make_loglikelihood_step(filename=None):
-    global loaded
+    shim.add_updates(optimizer_updates)
 
-    if 'logL step' in loaded:
-        return loaded['logL step'], loaded['logL step inputs']
+    logger.info("Compiling the optimization step function.")
+    self._step = theano.function([self.tidx], [], updates=shim.get_updates())
+    logger.info("Done compilation.")
 
-    mfmodel = derive_mf_model_from_spikes(filename)
 
-    logger.info("Producing the likelihood graph.")
 
-    ####################
-    # Some hacks to get around current limitations
-    loaded['spiking model'].λ.name = 'spikeλ'   # remove duplicate name
-    loaded['spiking model'].u.name = 'spikeu'
+    optimizer_updates = gd.NPAdam(-cost, fitparams, **kwargs)
 
-    histnames_to_delete = ['A_subsampled_by_5_smoothed']
-    dellist = []
-    for h in mfmodel.history_inputs:
-        if h.name in histnames_to_delete:
-            dellist.append(h)
-    for h in dellist:
-        del mfmodel.history_inputs[h]
-
-    dellist = []
-    for h in sinn.inputs:
-        if h.name in histnames_to_delete:
-            dellist.append(h)
-    for h in dellist:
-        del sinn.inputs[h]
-
-    # Extreme HACK
-    mfmodelT.θ_dis.locked = True
-    mfmodelT.θtilde_dis.locked = True
-
-    # End hacks
-    #####################
-
-    mfmodelT.theano_reset()
-    mfmodelT.clear_unlocked_histories()
-
-    #tidx = shim.getT().scalar('tidx', dtype='int32')
-    tvar = shim.getT().scalar('t', dtype='float32')
-    p = sinn.clip_probabilities(mfmodel.nbar[tvar] / mfmodel.params.N)
-    n = shim.cast(mfmodel.n[tvar], 'int32')
-    N = mfmodel.params.N
-
-    logL_step = ( -shim.log(shim.factorial(n, exact=False))
-                  -(N-n)*shim.log(N - n) + N-n + n*shim.log(p)
-                  + (N-n)*shim.log(1-p)
-                ).sum()
-
-    logger.info("Likelihood graph complete.")
-
-    loaded['logL step'] = logL_step
-    loaded['logL step inputs'] = [tvar]
-    return logL_step, [tvar]
-
-def compile_theano_loglikelihood2():
-    global compiled
-
-    if 'logL' in compiled:
-        return compiled['logL']
-
-    if not shim.config.use_theano:
-        load_theano()
-
-    logL, inputs = make_loglikelihood_step()
-
-    logger.info("Compiling loglikelihood step")
-    logL_step = shim.gettheano().function(
-        inputs, logL, updates=shim.get_updates())
-    logger.info("Done compiling.")
-
-    def logL_fn(burnin, datalen):
-
-        logger.info("Computing loglikelihood.")
-        for t in np.arange(0, burnin, mfmodel.n.dt, dtype='float32'):
-            # Fill the data without saving log L
-            logL_step(t)
-
-        logL = sum( logL_step(t)
-                    for t in np.arange(burnin, burnin+datalen,
-                                       mfmodel.n.dt, dtype='float32') )
-        logger.info("Done.")
-        return logL
-
-    compiled['logL'] = logL_fn
-    return logL_fn
-
-def compile_theano_gradloglikelihood2(wrt):
-    global compiled
-
-    if 'grad logL' in compiled:
-        return compiled['grad logL']
-
-    if not shim.config.use_theano:
-        load_theano()
-
-    logL, inputs = make_loglikelihood_step()
-    mfmodel = loaded['derived mf model']
-
-    logger.info("Compiling loglikelihood gradient steps.")
-    gradlogL_step = shim.gettheano().function(
-        inputs, shim.getT().grad(logL, wrt), updates=shim.get_updates())
-    logger.info("Done compiling.")
-
-    def gradlogL_fn(burnin, datalen):
-
-        logger.info("Computing loglikelihood gradient.")
-        for t in np.arange(0, burnin, mfmodel.n.dt, dtype='float32'):
-            # Fill the data without saving grad log L
-            gradlogL_step(t)
-
-        gradlogL = sum( gradlogL_step(t)
-                    for t in np.arange(burnin, burnin+datalen,
-                                       mfmodel.n.dt, dtype='float32') )
-        logger.info("Done.")
-        return gradlogL
-
-    compiled['grad logL'] = gradlogL_fn
-    return gradlogL_fn
-
-def get_sweep_param(name, index, fineness):
-    # index is including so that ranges may depend on it
-    if name == 'J_θ':
-        return sweep.linspace(0, 3, fineness)
-    elif name == 'τ_m':
-        return sweep.logspace(0.003, 0.07, fineness)
-    elif name == 'w':
-        return sweep.linspace(-0.5, 0.5, fineness)
-    else:
-        raise NotImplementedError
 
 
 def likelihood_sweep(param1, param2, fineness,
