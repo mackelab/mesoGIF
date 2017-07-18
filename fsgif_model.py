@@ -686,16 +686,16 @@ class GIF_mean_field(models.Model):
 
         # Used to fill the data by iterating
         # FIXME: This is only required because of our abuse of shared variable updates
-        if shim.config.use_theano:
-            logger.info("Compiling advance function.")
-            tidx = shim.getT().iscalar()
-            self.remove_other_histories()  # HACK
-            self.clear_unlocked_histories()
-            self.theano_reset()
-            self.nbar[tidx + self.nbar.t0idx]  # Fills updates
-            self._advance_fn = shim.gettheano().function([tidx], [], updates=shim.get_updates())
-            self.theano_reset()
-            logger.info("Done.")
+        # if shim.config.use_theano:
+        #     logger.info("Compiling advance function.")
+        #     tidx = shim.getT().iscalar()
+        #     self.remove_other_histories()  # HACK
+        #     self.clear_unlocked_histories()
+        #     self.theano_reset()
+        #     self.nbar[tidx + self.nbar.t0idx]  # Fills updates
+        #     self._advance_fn = shim.gettheano().function([tidx], [], updates=shim.get_updates())
+        #     self.theano_reset()
+        #     logger.info("Done.")
 
 
         # HACK For propagating gradients without scan
@@ -898,11 +898,67 @@ class GIF_mean_field(models.Model):
                 else:
                     break
 
-    # FIXME: This is only required because of our abuse of shared variable updates
+    # # FIXME: This is only required because of our abuse of shared variable
+    # # updates
+    # def advance(self, stop):
+    #     stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
+    #     for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
+    #         self._advance_fn(i)
+
     def advance(self, stop):
+
         stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
-        for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
-            self._advance_fn(i)
+
+        if not shim.config.use_theano:
+            self.nbar[stopidx]
+
+        else:
+            if not hasattr(self, '_advance_fn'):
+                logger.info("Compiling advance function.")
+                curtidx_var = shim.getT().lscalar()
+                stopidx_var = shim.getT().lscalar()
+                self.remove_other_histories()  # HACK
+                self.clear_unlocked_histories()
+                self.theano_reset()
+
+                def onestep(tidx, *args):
+                    statevar_upds, input_vars, output_vars = self.symbolic_update(tidx, args)
+                    return list(statevar_upds.values()), {}
+
+                outputs_info = []
+                for hist in self.statevars:
+                    outputs_info.append( hist._data[curtidx_var + hist.t0idx] )
+
+                outputs, upds = shim.gettheano().scan(onestep,
+                                                      sequences = shim.getT().arange(curtidx_var+1, stopidx_var),
+                                                      outputs_info = outputs_info)
+                self.apply_updates(upds)
+                    # Applying updates ensures we remove the iteration variable
+                    # scan introduces from the shim updates dictionary
+
+                self._advance_fn = shim.gettheano().function([curtidx_var, stopidx_var],
+                                                             outputs)
+
+                self.theano_reset()
+                logger.info("Done.")
+
+            curtidx = min( hist._original_tidx.get_value() - hist.t0idx
+                           for hist in self.statevars )
+
+            if curtidx+1 < stopidx:
+                newvals = self._advance_fn(curtidx, stopidx)
+                # HACK: We change the history directly to avoid dealing with updates
+                for hist, newval in zip(self.statevars, newvals):
+                    valslice = slice(curtidx+1+hist.t0idx, stopidx+hist.t0idx)
+
+                    data = hist._original_data.get_value(borrow=True)
+                    data[valslice] = newval
+                    hist._original_data.set_value(data, borrow=True)
+
+                    hist._data = hist._original_data
+                    hist._original_tidx.set_value( valslice.stop - 1 )
+                    hist._cur_tidx = hist._original_tidx
+
 
     def remove_other_histories(self):
         """HACK: Remove histories from sinn.inputs that are not in this model."""
@@ -930,10 +986,11 @@ class GIF_mean_field(models.Model):
 
         def logLstep(tidx, *args):
             if shim.is_theano_object(tidx):
-                step_updates, input_vars, output_vars = self.symbolic_update(tidx, args[1:])
+                statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[1:])
                 nbar = output_vars[self.nbar]
             else:
                 nbar = self.nbar[tidx+self.nbar.t0idx]
+                statevar_updates = {}
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
             n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
@@ -943,7 +1000,7 @@ class GIF_mean_field(models.Model):
                                    + (N-n)*shim.log(1-p)
                                   ).sum()
 
-            return [cum_logL] + list(step_updates.values()), {}
+            return [cum_logL] + list(statevar_updates.values()), {}
             # return [cum_logL], shim.get_updates()
 
         if shim.is_theano_object([self.nbar._data, self.params, self.n._data]):

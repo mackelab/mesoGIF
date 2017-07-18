@@ -536,16 +536,17 @@ def derive_mf_model_from_spikes(filename=None, max_len=None):
 # Likelihood functions
 ###########################
 
-# def get_sweep_param(name, index, fineness):
-#     # index is including so that ranges may depend on it
-#     if name == 'J_θ':
-#         return sweep.linspace(0, 3, fineness)
-#     elif name == 'τ_m':
-#         return sweep.logspace(0.003, 0.07, fineness)
-#     elif name == 'w':
-#         return sweep.linspace(-0.5, 0.5, fineness)
-#     else:
-#         raise NotImplementedError
+def get_sweep_param(name, index, fineness):
+    # index is including so that ranges may depend on it
+    if name == 'J_θ':
+        return sweep.linspace(0, 3, fineness)
+    elif name == 'τ_m':
+        return sweep.logspace(0.003, 0.07, fineness)
+    elif name == 'w':
+        #return sweep.linspace(-0.5, 0.5, fineness)
+        return sweep.linspace(-0.5, 1.5, fineness)
+    else:
+        raise NotImplementedError
 
 
 # def batch_Lgrad(model, wrt, start, stop):
@@ -642,7 +643,6 @@ def likelihood_sweep(param1, param2, fineness,
     #if mfmodel is None:
     #    mfmodel = _BASENAME + '.dat'
     mfmodel = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
-    print(mfmodel.u.shape)  # DEBUG
 
     if isinstance(mfmodel, str):
         try:
@@ -683,11 +683,11 @@ def likelihood_sweep(param1, param2, fineness,
     param_sweep.add_param(param2[0], idx=param2[1], axis_stops=param2_stops)
 
     # param_sweep.set_function(mfmodel.get_loglikelihood(start=burnin,
-    #                                                             stop=burnin+data_len),
+    #                                                    stop=burnin+data_len),
     #                          'log $L$')
 
     # HACK: Defining the logL function with batches instead of one scan
-    mbatch_size=1
+    #mbatch_size=1
     burnin_idx = mfmodel.get_t_idx(burnin, allow_rounding=True)
     stop_idx = mfmodel.get_t_idx(burnin+datalen, allow_rounding=True)
 
@@ -699,19 +699,23 @@ def likelihood_sweep(param1, param2, fineness,
         mfmodel.theano_reset()
         mfmodel.clear_unlocked_histories()
         tidx = shim.getT().lscalar('tidx')
-        logL_graph, upds = mfmodel.loglikelihood(tidx, mbatch_size)
+        logL_graph, statevar_upds, shared_upds = mfmodel.loglikelihood(tidx, stop_idx-tidx)
         logger.info("Compiling Theano loglikelihood")
-        logL_step = shim.gettheano().function([tidx], logL_graph,
-                                              updates=upds)
+        logL_step = shim.gettheano().function([tidx], logL_graph)
+                                              #updates=upds)
         logger.info("Done compilation.")
         mfmodel.theano_reset()
         def logL_fn(model):
-            mfmodel.clear_unlocked_histories()
-            return sum(logL_step(i)
-                       for i in range(burnin_idx, stop_idx, mbatch_size))
+            model.clear_unlocked_histories()
+            logger.info("Computing state variable traces...")
+            model.advance(burnin_idx)
+            logger.info("Computing log likelihood...")
+            return logL_step(burnin_idx)
+            #return sum(logL_step(i)
+            #           for i in range(burnin_idx, stop_idx, mbatch_size))
     else:
         def logL_fn(model):
-            return mfmodel.loglikelihood(burnin_idx, stop_idx-1-burnin_idx)[0]
+            return model.loglikelihood(burnin_idx, stop_idx-burnin_idx)[0]
 
     param_sweep.set_function(logL_fn, 'log $L$')
 
@@ -769,6 +773,85 @@ def exploglikelihood(loglikelihood):
     likelihood.set_norm('linear')
 
     return likelihood
+
+###########################
+# Gradient descent
+###########################
+
+# Clamp parameters: only parameters whose mask is set to True are fit
+def get_fitmask(model):
+    return {model.params.c: False,
+            model.params.w: np.array([[True, False],
+                                      [False, False]]),
+            model.params.τ_m: np.array([False, True])}
+
+def gradient_descent(learning_rate = 0.005, Nmax=5e4, cost_calc='full', cost_period=5):
+
+    if not shim.config.use_theano:
+        raise RuntimeError("Theano must be enabled for gradient descent.")
+
+    mfmodelT = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
+    fitmask = get_fit(mfmodelT)
+
+    sgd = sinn.optimize.gradient_descent.SGD(
+        mfmodelT.loglikelihood,
+        optimizer = 'adam',
+        model = mfmodelT,
+        burnin = burnin,
+        datalen = datalen,
+        mbatch_size = mbatch_size)
+
+    sgd.transform( mfmodelT.params.τ_m, 'logτ_m',
+                   lambda τ: shim.log10(τ), lambda logτ: 10**logτ )
+
+    sgd.compile( fitparams = fitmask,
+                 lr = learning_rate )
+
+    if 'true params' in loaded:
+        sgd.set_ground_truth(loaded['true params'])
+
+    evols = []
+
+    sgd.iterate(Nmax=Nmax, cost_calc=cost_calc, cost_period=cost_period)
+
+
+def plot_sgd_evols(params):
+    """
+    Parameters
+    ----------
+    params: str
+        Name of the parameters to plot
+    """
+
+    ncols = 2 if len(params) > 1 else 1
+    nrows = int(np.ceil(len(params) / 2))
+    plt.figure(figsize=(5*ncols, 4*nrows))
+
+    for i, pname in enumerate(params):
+        plt.subplot(nrows, ncols, i)
+
+        # Turn the name 'w_00' into 'w', [0,0]
+        name_comps = pname.split('_')
+        name = name_comps[0]
+        if len(name_comps) > 1:
+            assert(len(name_comps) == 2)
+            idx = (slice(None),) + tuple(name_comps[1])
+        else:
+            idx = slice(None)
+
+        # Do plot
+        plt.title("${}$ evolution".format(pname))
+        plt.plot(sgd.get_evol()[name][idx])
+        plt.xlabel("epoch")
+        plt.ylabel("${}$".format(pname))
+
+        # Add ground truth indicator
+        # TODO: Make color a variation of corresponding trace (maybe dashed?)
+        #       This would make plots with multiple traces clearer
+        if sgd.trueparams is not None:
+            for p, val in sgd.trueparams.items:
+                if p.name == name:
+                    plt.axhvline(val[idx[1:]], color='orange')
 
 ###########################
 # Plotting
