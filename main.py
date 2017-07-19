@@ -29,6 +29,7 @@ import sinn.models.noise as noise
 import sinn.iotools as io
 import sinn.analyze as anlz
 import sinn.analyze.sweep as sweep
+import sinn.optimize.gradient_descent
 from sinn.analyze.heatmap import HeatMap
 
 ############################
@@ -177,6 +178,8 @@ def create_input_history(input_history=None, output_history=None, model_params=N
 
     if rndstream is None:
         rndstream = shim.config.RandomStreams(seed=314)
+    elif isinstance(rndstream, int):
+        rndstream = shim.config.RandomStreams(seed=rndstream)
 
     def input_fn(t):
         import numpy as np
@@ -210,7 +213,7 @@ def create_input_history(input_history=None, output_history=None, model_params=N
     return Ihist, rndstream
 
 def init_spiking_model(spike_history=None, input_history=None, datalen=None,
-                       model_params=None, memory_time=None):
+                       model_params=None, memory_time=None, rndstream=None):
     """
     Parameters
     ----------
@@ -236,7 +239,7 @@ def init_spiking_model(spike_history=None, input_history=None, datalen=None,
 
     shist = create_spike_history(spike_history, datalen, model_params)
 
-    Ihist, rndstream = create_input_history(input_history, shist, model_params)
+    Ihist, rndstream = create_input_history(input_history, shist, model_params, rndstream)
 
     # GIF spiking model
     spiking_model = gif.GIF_spiking(model_params, shist, Ihist, rndstream,
@@ -245,7 +248,7 @@ def init_spiking_model(spike_history=None, input_history=None, datalen=None,
 
 
 def init_mean_field_model(activity_history=None, input_history=None, datalen=None,
-                          model_params=None, memory_time=None):
+                          model_params=None, memory_time=None, rndstream=None):
     """
     Parameters
     ----------
@@ -271,7 +274,7 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
 
     Ahist = create_activity_history(activity_history, input_history, datalen, model_params)
 
-    Ihist, rndstream = create_input_history(input_history, Ahist, model_params)
+    Ihist, rndstream = create_input_history(input_history, Ahist, model_params, rndstream)
 
     # HACK Required b/c mf_dt > delay
     model_params.Δ.set_value(np.clip(model_params.Δ.get_value(), mf_dt, None))
@@ -356,7 +359,7 @@ def fixparams(model):
     for key, val in zip(model.params._fields, model.params):
         val.name = key
 
-def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
+def generate_spikes(datalen, filename=None, autosave=True, recalculate=False, seed=None):
     global loaded
 
     if not recalculate:
@@ -368,7 +371,7 @@ def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
     if 'spiking model' not in loaded:
         # Spike data was not found
         logger.info("No precomputed data found. Generating new data...")
-        spiking_model = init_spiking_model(datalen=datalen)
+        spiking_model = init_spiking_model(datalen=datalen, rndstream=seed)
         shist = spiking_model.s
         Ihist = spiking_model.I_ext
 
@@ -380,7 +383,8 @@ def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
         if autosave:
             # Autosave the new data. The raw format is robust to future changes
             # of the library
-            io.save(filename, spiking_model)
+            #io.save(filename, spiking_model)
+               # These tend to be huge files
             fn, ext = os.path.splitext(filename)
             io.saveraw(fn + "_spikes" + ext, shist)
             io.saveraw(fn + "_input" + ext, Ihist)
@@ -397,7 +401,7 @@ def generate_spikes(datalen, filename=None, autosave=True, recalculate=False):
     return spiking_model
 
 
-def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
+def generate_activity(datalen, filename=None, autosave=True, recalculate=False, seed=None):
     global loaded
 
     if not recalculate:
@@ -408,7 +412,7 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False):
 
     if 'mf model' not in loaded:
         logger.info("No precomputed data found. Generating new data...")
-        mf_model = init_mean_field_model(datalen=datalen)
+        mf_model = init_mean_field_model(datalen=datalen, rndstream=seed)
         Ahist = mf_model.A
         Ihist = mf_model.I_ext
 
@@ -603,7 +607,7 @@ def compile_sgd(sgd, fitparams, mbatch_size, **kwargs):
 
 
 def likelihood_sweep(param1, param2, fineness,
-                     burnin = 0.5, datalen = 3.4,
+                     burnin = 0.5, datalen = 4.0,
                      #mean_field_model = None,
                      input_filename = None,
                      output_filename = None,
@@ -785,24 +789,39 @@ def get_fitmask(model):
                                       [False, False]]),
             model.params.τ_m: np.array([False, True])}
 
-def gradient_descent(learning_rate = 0.005, Nmax=5e4, cost_calc='full', cost_period=5):
+def gradient_descent(input_filename, batch_size,
+                     output_filename=None,
+                     burnin=0.5, datalen=4.0,
+                     learning_rate = 0.005, Nmax=5e4,
+                     cost_calc='full', cost_period=5):
+    global loaded
 
     if not shim.config.use_theano:
         raise RuntimeError("Theano must be enabled for gradient descent.")
 
-    mfmodelT = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
-    fitmask = get_fit(mfmodelT)
+    if output_filename is None:
+        logger.warning("No output filename was specified: optimization "
+                       "will not be saved automatically.")
+
+    mfmodel = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
+
+    #burnin_idx = mfmodel.get_t_idx(burnin, allow_rounding=True)
+    #stop_idx = mfmodel.get_t_idx(burnin+datalen, allow_rounding=True)
+
+    fitmask = get_fitmask(mfmodel)
 
     sgd = sinn.optimize.gradient_descent.SGD(
-        mfmodelT.loglikelihood,
+        mfmodel.loglikelihood,
         optimizer = 'adam',
-        model = mfmodelT,
+        model = mfmodel,
         burnin = burnin,
         datalen = datalen,
-        mbatch_size = mbatch_size)
+        mbatch_size = batch_size)
 
-    sgd.transform( mfmodelT.params.τ_m, 'logτ_m',
-                   lambda τ: shim.log10(τ), lambda logτ: 10**logτ )
+    for time_cst in [mfmodel.params.τ_m, mfmodel.params.τ_θ]:
+        if time_cst in fitmask:
+            sgd.transform( time_cst, 'log' + time_cst.name,
+                           'τ -> shim.log10(τ)', 'logτ -> 10**logτ' )
 
     sgd.compile( fitparams = fitmask,
                  lr = learning_rate )
@@ -810,10 +829,13 @@ def gradient_descent(learning_rate = 0.005, Nmax=5e4, cost_calc='full', cost_per
     if 'true params' in loaded:
         sgd.set_ground_truth(loaded['true params'])
 
-    evols = []
-
     sgd.iterate(Nmax=Nmax, cost_calc=cost_calc, cost_period=cost_period)
 
+    io.saveraw(output_filename, sgd)
+
+    loaded['sgd'] = sgd
+
+    return sgd
 
 def plot_sgd_evols(params):
     """
@@ -1004,16 +1026,18 @@ else:
     @click.option('--datalen', type=float, help="Amount of data to generate, in seconds")
     @click.option('--output', default="")
     @click.option('--save/--no-save', default=True)
-    def spikes(datalen, output, save):
-        return generate_spikes(datalen, output, save)
+    @click.option('--seed', default=314)
+    def spikes(datalen, output, save, seed):
+        return generate_spikes(datalen, output, save, seed)
 
     # TODO: Specify datalen with units (e.g. 4s or 300ms)
     @click.command()
     @click.option('--datalen', type=float, help="Amount of data to generate, in seconds")
     @click.option('--output', default="")
     @click.option('--save/--nosave', default=True)
-    def activity(datalen, output, save):
-        return generate_activity(datalen, output, save)
+    @click.option('--seed', default=314)
+    def activity(datalen, output, save, seed):
+        return generate_activity(datalen, output, save, seed)
 
     generate.add_command(spikes)
     generate.add_command(activity)
@@ -1050,7 +1074,7 @@ else:
     @click.option('--output', default="")
     @click.option('--fineness', default="")
     @click.option('--burnin', default=0.5)
-    @click.option('--datalen', default=3.4)
+    @click.option('--datalen', default=4.0)
     @click.option('--recalculate/--use-saved', default=False)
     @click.option('--ipp_url_file', default="")
     @click.option('--ipp_profile', default="")
@@ -1109,6 +1133,34 @@ else:
                                 ipp_profile = ipp_profile)
 
     compute.add_command(loglikelihood)
+
+    ####
+    # Fitting commands
+
+    @click.command()
+    @click.option('--input', default="")
+    @click.option('--output', default="")
+    @click.option('--batch', default=100)
+    @click.option('--burnin', default=0.5)
+    @click.option('--datalen', default=4.0)
+    @click.option('--lr', default=0.005, help="Learning rate")
+    @click.option('--Nmax', default=5e4, help="Maximum number of steps")
+        # options are converted to lowercase, so 'nmax' is used in the function definition
+    @click.option('--cost', default="full", help="(cum|full) How the likelihood is calculated. "
+                                                 "Little reason not to use default (full).")
+    @click.option('--monitor', default=5, help="(int) Interval, in steps, at which to compute "
+                                               "and display the likelihood.")
+    def fit(input, output, batch, burnin, datalen, lr, nmax, cost, monitor):
+        input = input if input != "" else None
+        output = output if output != "" else None
+        gradient_descent(input_filename=input, output_filename=output,
+                         batch_size=batch,
+                         burnin=burnin, datalen=datalen,
+                         learning_rate=lr, Nmax=int(nmax),
+                         cost_calc=cost, cost_period=monitor)
+
+    cli.add_command(fit)
+
 
     ####
     # Plotting commands
