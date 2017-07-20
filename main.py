@@ -100,11 +100,11 @@ def get_params():
         u_rest = np.array((20.123, 20.362)),   # mV, p. 55
         p      = p,                    # Connection probability
         w      = ((0.176, -0.702),
-                 #((0.11, -0.702),
+                 #((-0.5, -0.702),     # DEBUG
                   (0.176, -0.702)),    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
         τ_m    = (0.02, 0.02),    # s,  membrane time constant
-        #τ_m    = (0.02, 0.25),
+        #τ_m    = (0.02, 0.003),    # DEBUG
         t_ref  = (0.004, 0.004),  # s,  absolute refractory period
         u_th   = (15, 15),        # mV, non-adapting threshold  (p.54)
         u_r    = (0, 0),          # mV, reset potential   (p. 54)

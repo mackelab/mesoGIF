@@ -954,8 +954,8 @@ class GIF_mean_field(models.Model):
                     data = hist._original_data.get_value(borrow=True)
                     data[valslice] = newval
                     hist._original_data.set_value(data, borrow=True)
-
                     hist._data = hist._original_data
+
                     hist._original_tidx.set_value( valslice.stop - 1 )
                     hist._cur_tidx = hist._original_tidx
 
@@ -1240,7 +1240,7 @@ class GIF_mean_field(models.Model):
     def P_Λ_fn(self, t):
         """p.53, line 28"""
         tidx_z = self.z.get_t_idx(t)
-        z = self.z._data[tidx_z-1] # Hack: Don't trigger computation of z 'up to' t-1
+        z = self.z[tidx_z-1] # Hack: Don't trigger computation of z 'up to' t-1
         Z = self.Z[t]
         return shim.switch( Z + z > 0,
                             ( (self.Y[t] + self.Pfree[t]*z)
