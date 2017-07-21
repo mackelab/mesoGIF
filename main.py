@@ -822,9 +822,15 @@ def gradient_descent(input_filename, batch_size,
     Parameters
     ----------
     […]
-    init_vals: dictionary {str: ndarray}
+    init_vals: str, int, dictionary {str: ndarray}
        Dictionary of initial values, keyed by the variable name.
        Unspecified variables take ground truth values.
+       If specified as a single integer, taken as the seed to generate
+       random initial values.
+       If the string 'random', initial values are chosen at random (the
+       seed is assumed to already have been set)
+       If running multiple processes with random initialization, make sure
+       they all have different seeds.
     """
     global loaded
 
@@ -866,12 +872,17 @@ def gradient_descent(input_filename, batch_size,
         sgd.set_ground_truth(loaded['true params'])
 
     if init_vals is not None:
-        if init_vals == 'random':
-            params = [ sgd.get_param(name) for name in ['c', 'w', 'logτ_m'] ]
-            _init_vals = { p: getdist(p) for p in params }
-        else:
+        if isinstance(init_vals, dict):
             _init_vals = { sgd.get_param(pname): val
                            for pname, val in init_vals.items() }
+        else:
+            if isinstance(init_vals, int):
+                np.random.seed(init_vals)
+            elif init_vals != 'random':
+                raise ValueError("Unrecognized form for `init_vals`: {}".format(init_vals))
+            params = [ sgd.get_param(name) for name in ['c', 'w', 'logτ_m'] ]
+            _init_vals = { p: getdist(p) for p in params }
+
         sgd.initialize(_init_vals, fitmask)
             # Specifying fitmask ensures that parameters which
             # are not being fit are left at the ground truth value

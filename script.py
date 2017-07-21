@@ -18,40 +18,38 @@ def _init_logging_handlers():
     logger.addHandler(ch)
 
 
-def fit():
+def fit(init_seed):
     import numpy as np
     import main
 
-    seed = np.random.choice([0, 100, 200, 300])
+    np.random.seed(init_seed)
+    data_seed = np.random.choice([0, 100, 200, 300])
 
-    print("fit for data seeded {}".format(seed))
-    input_filename = "data/short_adap/spikes/fsgif_sin-input_10s_{:0>3}seed".format(seed)
+    print("fit for data seeded {}".format(data_seed))
+    input_filename = "data/short_adap/spikes/fsgif_sin-input_10s_{:0>3}seed".format(data_seed)
     batch = 100
     burnin = 0.5
     datalen = 8.0
     lr = 0.0005
-    output_filename = ("data/short_adap/fits/fit_{}s_{}lr_{}batch_{:0>3}seed.sir"
-                       .format(int(datalen), str(lr)[2:], batch, seed))
+    output_filename = ("data/short_adap/fits/random_init/fit_{}s_{}lr_{}batch_{:0>3}seed.sir"
+                       .format(int(datalen), str(lr)[2:], batch, data_seed))
 
     main.load_theano()
     main.gradient_descent(input_filename, batch, output_filename,
                           burnin, datalen, lr,
-                          Nmax=5e4,
+                          Nmax=2e4,
                           init_vals='random')
 
     print("Done.")
 
 if __name__ == '__main__':
-
     _init_logging_handlers()
+
     reslst = []
-    with multiprocessing.Pool(12) as pool:
-        for i in range(48):
-            reslst.append(pool.apply_async(fit))
+    with multiprocessing.Pool(6) as pool:
+        for i in range(12):
+            reslst.append(pool.apply_async(fit, [i]))
 
         pool.close()
         pool.join() # wait for processes to exit
-
-    for res in reslst:
-        print(res.get())
 
