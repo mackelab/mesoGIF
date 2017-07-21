@@ -99,8 +99,8 @@ def get_params():
         R      = np.array((1, 1)),     # Ω, membrane resistance; no value given (unit assumes I_ext in mA)
         u_rest = np.array((20.123, 20.362)),   # mV, p. 55
         p      = p,                    # Connection probability
-        w      = ((0.176, -0.702),
-                 #((-0.5, -0.702),     # DEBUG
+        w      = #((0.176, -0.702),
+                 ((0.5, -0.702),     # DEBUG
                   (0.176, -0.702)),    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
         τ_m    = (0.02, 0.02),    # s,  membrane time constant
@@ -443,7 +443,7 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False, 
 # Data processing functions
 ###########################
 
-def compute_spike_activity(filename=None, max_len=None):
+def compute_spike_activity(filename=None, max_len=None, spike_history=None):
     """
     Parameters
     ----------
@@ -454,6 +454,9 @@ def compute_spike_activity(filename=None, max_len=None):
         is longer, the resulting activity and input arrays are truncated.
         If specified as an integer, considered as a number of bins rather
         than time units.
+    spike_history: Spiketrain instance
+        If given, use this spike_history rather than the one already loaded
+        or the one found under `filename`.
     """
 
     if 'spike activity' in loaded:
@@ -463,11 +466,14 @@ def compute_spike_activity(filename=None, max_len=None):
     use_theano = shim.config.use_theano
     shim.load(load_theano=False)
 
-    load_spikes(filename)
-    try:
-        shist = loaded['spiking model'].s
-    except KeyError:
-        raise ValueError("The file spike file '{}' was not found.".format(filename))
+    if spike_history is not None:
+        shist = spike_history
+    else:
+        load_spikes(filename)
+        try:
+            shist = loaded['spiking model'].s
+        except KeyError:
+            raise ValueError("The file spike file '{}' was not found.".format(filename))
 
     spikeAhist = anlz.mean(shist, shist.pop_slices) / shist.dt
     spikeAhist.name = "A (spikes)"
@@ -500,6 +506,8 @@ def compute_spike_activity(filename=None, max_len=None):
 
     # Reload Theano if it was loaded when we entered the function
     shim.load(load_theano=use_theano)
+
+    return Ahist, Ihist
 
 
 def derive_mf_model_from_spikes(filename=None, max_len=None):
@@ -789,11 +797,35 @@ def get_fitmask(model):
                                       [False, False]]),
             model.params.τ_m: np.array([False, True])}
 
+def getdist(param):
+    shape = param.get_value().shape
+    if len(shape) == 0:
+        shape = None
+
+    if param.name == 'c':
+        return np.exp( np.random.normal(1.2, .7, size=shape) )
+    elif param.name == 'w':
+        # Bi-modal distribution by way of a mixed-Gaussian
+        μ = np.random.choice([0, 5], p=[0.7, 0.3])
+        return np.random.normal(μ, 1, size=shape)
+    elif param.name == 'logτ_m':
+        return -np.exp(np.random.normal(0.3, 0.5, size=shape))
+
 def gradient_descent(input_filename, batch_size,
                      output_filename=None,
                      burnin=0.5, datalen=4.0,
                      learning_rate = 0.005, Nmax=5e4,
-                     cost_calc='full', cost_period=5):
+                     cost_calc='full', cost_period=5,
+                     model=None, fitmask=None, init_vals=None,
+                     trust_transforms=False):
+    """
+    Parameters
+    ----------
+    […]
+    init_vals: dictionary {str: ndarray}
+       Dictionary of initial values, keyed by the variable name.
+       Unspecified variables take ground truth values.
+    """
     global loaded
 
     if not shim.config.use_theano:
@@ -803,31 +835,47 @@ def gradient_descent(input_filename, batch_size,
         logger.warning("No output filename was specified: optimization "
                        "will not be saved automatically.")
 
-    mfmodel = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
+    if model is None:
+        model = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
 
-    #burnin_idx = mfmodel.get_t_idx(burnin, allow_rounding=True)
-    #stop_idx = mfmodel.get_t_idx(burnin+datalen, allow_rounding=True)
+    #burnin_idx = model.get_t_idx(burnin, allow_rounding=True)
+    #stop_idx = model.get_t_idx(burnin+datalen, allow_rounding=True)
 
-    fitmask = get_fitmask(mfmodel)
+    if fitmask is None:
+        fitmask = get_fitmask(model)
 
     sgd = sinn.optimize.gradient_descent.SGD(
-        mfmodel.loglikelihood,
+        model.loglikelihood,
         optimizer = 'adam',
-        model = mfmodel,
+        model = model,
         burnin = burnin,
         datalen = datalen,
         mbatch_size = batch_size)
 
-    for time_cst in [mfmodel.params.τ_m, mfmodel.params.τ_θ]:
+    for time_cst in [model.params.τ_m, model.params.τ_θ]:
         if time_cst in fitmask:
             sgd.transform( time_cst, 'log' + time_cst.name,
                            'τ -> shim.log10(τ)', 'logτ -> 10**logτ' )
+    if trust_transforms:
+        sgd.verify_transforms(trust_automatically=True)
 
     sgd.compile( fitparams = fitmask,
                  lr = learning_rate )
 
     if 'true params' in loaded:
         sgd.set_ground_truth(loaded['true params'])
+
+    if init_vals is not None:
+        if init_vals == 'random':
+            params = [ sgd.get_param(name) for name in ['c', 'w', 'logτ_m'] ]
+            _init_vals = { p: getdist(p) for p in params }
+        else:
+            _init_vals = { sgd.get_param(pname): val
+                           for pname, val in init_vals.items() }
+        sgd.initialize(_init_vals, fitmask)
+            # Specifying fitmask ensures that parameters which
+            # are not being fit are left at the ground truth value
+
 
     sgd.iterate(Nmax=Nmax, cost_calc=cost_calc, cost_period=cost_period)
 
