@@ -99,8 +99,8 @@ def get_params():
         R      = np.array((1, 1)),     # Ω, membrane resistance; no value given (unit assumes I_ext in mA)
         u_rest = np.array((20.123, 20.362)),   # mV, p. 55
         p      = p,                    # Connection probability
-        w      = #((0.176, -0.702),
-                 ((0.5, -0.702),     # DEBUG
+        w      = ((0.176, -0.702),
+                 #((0.5, -0.702),     # DEBUG
                   (0.176, -0.702)),    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
         τ_m    = (0.02, 0.02),    # s,  membrane time constant
@@ -276,8 +276,15 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
 
     Ihist, rndstream = create_input_history(input_history, Ahist, model_params, rndstream)
 
-    # HACK Required b/c mf_dt > delay
-    model_params.Δ.set_value(np.clip(model_params.Δ.get_value(), mf_dt, None))
+    # HACK Make sure transmission delay is no less than time step
+    if shim.isshared(model_params.Δ):
+        assert( (model_params.Δ.get_value() > mf_dt).all() )
+    else:
+        assert( (np.array(model_params.Δ) >= mf_dt).all() )
+    # if shim.isshared(model_params.Δ):
+    #     model_params.Δ.set_value(np.clip(model_params.Δ.get_value(), mf_dt, None))
+    # else:
+    #     model_params.Δ = np.clip(model_params.Δ, mf_dt, None)
 
     # GIF spiking model
     mf_model = gif.GIF_mean_field(model_params, Ahist, Ihist, rndstream,
