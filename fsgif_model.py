@@ -1137,7 +1137,7 @@ class GIF_mean_field(models.Model):
             # HACK: force Theano to compute up to tidx_λ first
             #       This is required because of the hack in History.compute_up_to
             #       which assumes only one update per history is required
-        return 1 - shim.exp(-0.5 * (self.λfree[tidx_λ-1] + self.λfree[tidx_λ] * self.Pfree.dt) )
+        return 1 - shim.exp(-0.5 * (self.λfree[tidx_λ-1] + self.λfree[tidx_λ]) * self.Pfree.dt )
 
     def X_fn(self, t):
         """p. 53, line 12"""
@@ -1371,7 +1371,7 @@ class GIF_mean_field(models.Model):
         λfreet = self.f(ht - varθfree[0])
 
         # Pfreet
-        Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet * self.Pfree.dt) )
+        Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet) * self.Pfree.dt )
 
         # P_λt
         P_λ_tmp = 0.5 * (λt[:-1] + λ0[:-1]) * self.P_λ.dt

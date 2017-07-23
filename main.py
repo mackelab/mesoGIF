@@ -278,7 +278,7 @@ def init_mean_field_model(activity_history=None, input_history=None, datalen=Non
 
     # HACK Make sure transmission delay is no less than time step
     if shim.isshared(model_params.Δ):
-        assert( (model_params.Δ.get_value() > mf_dt).all() )
+        assert( (model_params.Δ.get_value() >= mf_dt).all() )
     else:
         assert( (np.array(model_params.Δ) >= mf_dt).all() )
     # if shim.isshared(model_params.Δ):
