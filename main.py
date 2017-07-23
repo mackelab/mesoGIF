@@ -1045,18 +1045,26 @@ def plot_likelihood(loglikelihood_filename = None,
 ###########################
 
 if __name__ == '__main__':
-    _init_logging_handlers()
-    #load_theano()
-    #generate_activity(4)
-    likelihood_sweep(('w', (0,0)),
-                     ('τ_m', (1,)),
-                     fineness=1,
-                     input_filename = 'fsgif_4s_sin-input_hi-res.dat',
-                     output_filename = 'fsgif_4s_sin-input_loglikelihood.data')
-                     #recalculate = recalculate,
-                     #ipp_url_file = ipp_url_file,
-                     #ipp_profile = ipp_profile
+    import multiprocessing
 
+    _init_logging_handlers()
+    load_theano()
+    #generate_activity(4)
+    def f(datalen):
+        likelihood_sweep(('w', (0,0)),
+                        ('τ_m', (1,)),
+                        fineness=(15,5),
+                         burnin=0.5,
+                         datalen=datalen,
+                        input_filename = 'data/short_adap/fsgif_10s_sin-input',
+                        output_filename = 'data/short_adap/fsgif_{}s_sin-input_loglikelihood_theano.sir'.format(datalen))
+                        #recalculate = recalculate,
+                        #ipp_url_file = ipp_url_file,
+                        #ipp_profile = ipp_profile
+
+
+    with multiprocessing.Pool(4) as pool:
+        pool.map(f, [2,6,8])
 ##########################
 # cli interface
 ##########################
