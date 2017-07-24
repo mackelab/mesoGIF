@@ -100,7 +100,7 @@ def get_params():
         u_rest = np.array((20.123, 20.362)),   # mV, p. 55
         p      = p,                    # Connection probability
         w      = ((0.176, -0.702),
-                 #((0.5, -0.702),     # DEBUG
+                 #((0.465, -0.702),     # DEBUG
                   (0.176, -0.702)),    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
         τ_m    = (0.02, 0.02),    # s,  membrane time constant
@@ -1046,25 +1046,29 @@ def plot_likelihood(loglikelihood_filename = None,
 
 if __name__ == '__main__':
     import multiprocessing
+    import itertools
 
     _init_logging_handlers()
     load_theano()
     #generate_activity(4)
-    def f(datalen):
+    def f(datalen, seed):
         likelihood_sweep(('w', (0,0)),
-                        ('τ_m', (1,)),
-                        fineness=(15,5),
+                         ('τ_m', (1,)),
+                         fineness=(15,5),
                          burnin=0.5,
                          datalen=datalen,
-                        input_filename = 'data/short_adap/fsgif_10s_sin-input',
-                        output_filename = 'data/short_adap/fsgif_{}s_sin-input_loglikelihood_theano.sir'.format(datalen))
-                        #recalculate = recalculate,
-                        #ipp_url_file = ipp_url_file,
-                        #ipp_profile = ipp_profile
+                         input_filename = 'data/short_adap/spikes/fsgif_sin-input_10s_{:0>3}seed'.format(seed),
+                         output_filename = 'data/short_adap/likelihoods/fsgif_sin-input_{}s_{}seed_loglikelihood_theano'.format(datalen, seed))
+                         #recalculate = recalculate,
+                         #ipp_url_file = ipp_url_file,
+                         #ipp_profile = ipp_profile
 
 
-    with multiprocessing.Pool(4) as pool:
-        pool.map(f, [2,6,8])
+    with multiprocessing.Pool(3) as pool:
+        datalens = [2,4,6,8]
+        seeds = [0, 100, 200, 300]
+        #pool.starmap(f, itertools.product(datalens, seeds))
+        pool.starmap(f, [(8, 0), (8, 200), (8, 300)])
 ##########################
 # cli interface
 ##########################

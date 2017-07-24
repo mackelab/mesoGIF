@@ -37,7 +37,7 @@ def fit(init_seed):
     main.load_theano()
     main.gradient_descent(input_filename, batch, output_filename,
                           burnin, datalen, lr,
-                          Nmax=2e4,
+                          Nmax=6e4,
                           init_vals='random')
 
     print("Done.")
@@ -46,8 +46,8 @@ if __name__ == '__main__':
     _init_logging_handlers()
 
     reslst = []
-    with multiprocessing.Pool(6) as pool:
-        for i in range(12):
+    with multiprocessing.Pool(9) as pool:
+        for i in range(27):
             reslst.append(pool.apply_async(fit, [i]))
 
         pool.close()
