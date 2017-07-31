@@ -41,8 +41,9 @@ class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
     Parameters = kernels.com.define_parameters(Parameter_info)
     @staticmethod
     def get_kernel_params(model_params):
+        Npops = len(model_params.N.get_value())
         return Kernel_θ1.Parameters(
-            height = (shim.cf.inf, shim.cf.inf),
+            height = (shim.cf.inf,)*Npops,
             start  = 0,
             stop   = model_params.t_ref
         )
@@ -131,7 +132,7 @@ class GIF_spiking(models.Model):
         self.Npops = len(N)
 
         # Model variables
-        self.RI_syn = Series(self.s, 'RI_syn', 
+        self.RI_syn = Series(self.s, 'RI_syn',
                              shape = (N.sum(), ))
         self.λ = Series(self.RI_syn, 'λ')
         self.varθ = Series(self.RI_syn, 'ϑ')
@@ -927,7 +928,12 @@ class GIF_mean_field(models.Model):
 
                 outputs_info = []
                 for hist in self.statevars:
-                    outputs_info.append( hist._data[curtidx_var + hist.t0idx] )
+                    outputs_info.append( hist._data[curtidx_var + hist.t0idx])
+                    # HACK-y !!
+                    if hist.name == 'v':
+                        outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
+                    elif hist.name == 'z':
+                        outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
 
                 outputs, upds = shim.gettheano().scan(onestep,
                                                       sequences = shim.getT().arange(curtidx_var+1, stopidx_var),
@@ -984,16 +990,22 @@ class GIF_mean_field(models.Model):
         stopidx = startidx + batch_size
         N = self.params.N
 
+        # Windowed test
+        #windowlen = 5
+        #stopidx -= windowlen
+
         def logLstep(tidx, *args):
             if shim.is_theano_object(tidx):
                 statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[1:])
                 nbar = output_vars[self.nbar]
             else:
                 nbar = self.nbar[tidx+self.nbar.t0idx]
+                #nbar = self.nbar[tidx+self.nbar.t0idx-windowlen:tidx+self.nbar.t0idx].sum(axis=0)
                 statevar_updates = {}
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
             n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
+            #n = shim.cast(self.n[tidx+self.n.t0idx-windowlen:tidx+self.n.t0idx].sum(axis=0), 'int32')
 
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
                                    + n*shim.log(p)
@@ -1011,7 +1023,11 @@ class GIF_mean_field(models.Model):
             outputs_info = [shim.cast(0, sinn.config.floatX)]
             for hist in self.statevars:
                 outputs_info.append( hist._data[startidx + hist.t0idx - 1] )
-
+                # HACK !!
+                if hist.name == 'v':
+                    outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
+                elif hist.name == 'z':
+                    outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
             if batch_size == 1:
                 # No need for scan
                 outputs, upds = logLstep(start, *outputs_info)

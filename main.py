@@ -186,6 +186,7 @@ def create_input_history(input_history=None, output_history=None, model_params=N
         # import ensures that proper references to dependencies are pickled
         # This is only necessary for scripts directly called on the cli – imported modules are fine.
         amp = np.array([6, 2])
+        #amp = np.array([0, 0])
         if not shim.isscalar(t):
             amp = amp[np.newaxis, :]
         res = amp * (1 + shim.sin(t*2*np.pi)[..., np.newaxis]) + noise_hist[t]
@@ -560,10 +561,12 @@ def get_sweep_param(name, index, fineness):
     if name == 'J_θ':
         return sweep.linspace(0, 3, fineness)
     elif name == 'τ_m':
-        return sweep.logspace(0.003, 0.07, fineness)
+        #return sweep.logspace(0.003, 0.07, fineness)
+        return sweep.logspace(0.012, 0.035, fineness)
     elif name == 'w':
         #return sweep.linspace(-0.5, 0.5, fineness)
-        return sweep.linspace(-0.5, 1.5, fineness)
+        #return sweep.linspace(-0.5, 1.5, fineness)
+        return sweep.linspace(0, 1.5, fineness)
     else:
         raise NotImplementedError
 
@@ -887,6 +890,7 @@ def gradient_descent(input_filename, batch_size,
                 np.random.seed(init_vals)
             elif init_vals != 'random':
                 raise ValueError("Unrecognized form for `init_vals`: {}".format(init_vals))
+            logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
             params = [ sgd.get_param(name) for name in ['c', 'w', 'logτ_m'] ]
             _init_vals = { p: getdist(p) for p in params }
 
@@ -1051,24 +1055,28 @@ if __name__ == '__main__':
     _init_logging_handlers()
     load_theano()
     #generate_activity(4)
-    def f(datalen, seed):
+    def f(burnin, datalen, seed):
+        global loaded
+        if 'derived mf model' in loaded:
+            del loaded['derived mf model']
         likelihood_sweep(('w', (0,0)),
                          ('τ_m', (1,)),
                          fineness=(15,5),
-                         burnin=0.5,
+                         burnin=burnin,
                          datalen=datalen,
-                         input_filename = 'data/short_adap/spikes/fsgif_sin-input_10s_{:0>3}seed'.format(seed),
-                         output_filename = 'data/short_adap/likelihoods/fsgif_sin-input_{}s_{}seed_loglikelihood_theano'.format(datalen, seed))
+                         input_filename = 'data/short_adap/spikes/fsgif_sin-input_20s_{}seed'.format(seed),
+                         output_filename = 'data/short_adap/likelihoods/fsgif_sin-input_{}burnin_{}s_{}seed_loglikelihood_theano'.format(io.paramstr(burnin), io.paramstr(datalen), io.paramstr(seed)))
                          #recalculate = recalculate,
                          #ipp_url_file = ipp_url_file,
                          #ipp_profile = ipp_profile
 
-
-    with multiprocessing.Pool(3) as pool:
-        datalens = [2,4,6,8]
-        seeds = [0, 100, 200, 300]
-        #pool.starmap(f, itertools.product(datalens, seeds))
-        pool.starmap(f, [(8, 0), (8, 200), (8, 300)])
+    with multiprocessing.Pool(11) as pool:
+        burnins = range(6, 17)
+        burnins = [1]
+        datalens = [2]
+        seeds = [314]
+        pool.starmap(f, itertools.product(burnins, datalens, seeds))
+        #pool.starmap(f, [(2, 314), (4, 314), (6, 314)])
 ##########################
 # cli interface
 ##########################
