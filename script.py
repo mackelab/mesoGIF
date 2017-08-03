@@ -19,6 +19,10 @@ def _init_logging_handlers():
     logger.addHandler(fh)
     logger.addHandler(ch)
 
+seed_lsts = {'sin': [0, 100, 200, 300, 314],
+             'flat': [314],
+             'no': [314]}
+
 def fit(input_desc, init_seed, nparams):
     import numpy as np
     import main_1pop as main

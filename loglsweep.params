@@ -1,0 +1,16 @@
+{
+    "type": "likelihood sweep",
+    "input": "short_adap/spikes/fsgif_no-input_20s_{}seed",
+    "output_dir": "data/short_adap/likelihoods/",
+    "param1": {"name": "w",
+               "idx": (0,0),
+               "range_desc": ("lin", 0, 3)},
+    "param2": {"name":"τ_m",
+               "idx": (1,),
+               "range_desc": ("log", 0.002, 0.07)},
+    "fineness": (5, 1),
+    "burnin": 0.5,
+    "datalen": 4.0,
+    "seed": 314,
+    "processes": 1
+  }

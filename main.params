@@ -1,0 +1,7 @@
+{
+  "model": url("model2pop.params"),
+
+  "sim": url("simdefault.params"),
+
+  "calculation": url("loglsweep.params")
+}

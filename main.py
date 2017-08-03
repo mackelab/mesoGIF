@@ -12,7 +12,9 @@ import copy
 import numpy as np
 import scipy as sp
 import collections
-from collections import namedtuple, OrderedDict
+from collections import namedtuple, OrderedDict, Iterable
+
+import parameters
 
 try:
     import matplotlib.pyplot as plt
@@ -74,6 +76,7 @@ loaded = {}
 filenames = {}  # filenames of loaded objects which are also saved to disk
 params = {}
 compiled = {}
+run_params = None
 
 ################################
 # Model creation
@@ -82,46 +85,51 @@ compiled = {}
 
 ###########
 # Step sizes
-spike_dt = 0.0002
-mf_dt = 0.001
+spike_dt = None
+mf_dt = None
 ###########
 
 def get_params():
+    global spike_dt, mf_dt
+
+    if run_params is None:
+        # parameter_file is a global parameter
+        raise RuntimeError("Parameters were not loaded.")
+
+    spike_dt = run_params.sim.spike_dt
+    mf_dt = run_params.sim.mf_dt
+    memory_time = run_params.sim.memory_time  # Adjust according to τ
+
     # Generate the random connectivity
-    N = np.array((500, 100)) # No. of neurons in each pop
-    p = np.array(((0.1009, 0.1689), (0.1346, 0.1371))) # Connection probs between pops
-    Γ = gif.GIF_spiking.make_connectivity(N, p)
+    #N = np.array((500, 100)) # No. of neurons in each pop
+    #p = np.array(((0.1009, 0.1689), (0.1346, 0.1371))) # Connection probs between pops
+    Γ = gif.GIF_spiking.make_connectivity(run_params.model.N, run_params.model.p)
 
     # Most parameters taken from Table 1, p.32
     # or the L2/3 values from Table 2, p. 55
     model_params = gif.GIF_spiking.Parameters(
-        N      = N,
-        R      = np.array((1, 1)),     # Ω, membrane resistance; no value given (unit assumes I_ext in mA)
-        u_rest = np.array((20.123, 20.362)),   # mV, p. 55
-        p      = p,                    # Connection probability
-        w      = ((0.176, -0.702),
-                 #((0.465, -0.702),     # DEBUG
-                  (0.176, -0.702)),    # mV, p. 55, L2/3
+        N      = run_params.model.N,
+        R      = run_params.model.R,     # Ω, membrane resistance; no value given (unit assumes I_ext in mA)
+        u_rest = run_params.model.u_rest,   # mV, p. 55
+        p      = run_params.model.p,                    # Connection probability
+        w      = run_params.model.w,    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
-        τ_m    = (0.02, 0.02),    # s,  membrane time constant
+        τ_m    = run_params.model.τ_m,    # s,  membrane time constant
         #τ_m    = (0.02, 0.003),    # DEBUG
-        t_ref  = (0.004, 0.004),  # s,  absolute refractory period
-        u_th   = (15, 15),        # mV, non-adapting threshold  (p.54)
-        u_r    = (0, 0),          # mV, reset potential   (p. 54)
-        c      = (10, 10),        # Hz, escape rate at threshold
-        Δu     = (5, 5),          # mV, noise level  (p. 54)
-        Δ      = ((0.001, 0.001),
-                  (0.001, 0.001)),# s,  transmission delay
-        τ_s    = ((0.003, 0.006),
-                  (0.003, 0.006)),# mV, synaptic time constants (kernel ε)
+        t_ref  = run_params.model.t_ref,  # s,  absolute refractory period
+        u_th   = run_params.model.u_th,        # mV, non-adapting threshold  (p.54)
+        u_r    = run_params.model.u_r,          # mV, reset potential   (p. 54)
+        c      = run_params.model.c,        # Hz, escape rate at threshold
+        Δu     = run_params.model.Δu,          # mV, noise level  (p. 54)
+        Δ      = run_params.model.Δ,# s,  transmission delay
+        τ_s    = run_params.model.τ_s,# mV, synaptic time constants (kernel ε)
                                   # Exc: 3 ms, Inh: 6 ms
         # Adaptation parameters   (p.55)
-        J_θ    = (1.0, 0),        # Integral of adaptation kernel θ (mV s)
-        τ_θ    = (0.2, 0.001)
+        J_θ    = run_params.model.J_θ,        # Integral of adaptation kernel θ (mV s)
+        τ_θ    = run_params.model.τ_θ
         #τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
                                   # since strength is zero; we just set a value != 0 to avoid dividing by 0
     )
-    memory_time = 0.553  # Adjust according to τ
 
     return model_params, memory_time
 
@@ -556,19 +564,24 @@ def derive_mf_model_from_spikes(filename=None, max_len=None):
 # Likelihood functions
 ###########################
 
-def get_sweep_param(name, index, fineness):
-    # index is including so that ranges may depend on it
-    if name == 'J_θ':
-        return sweep.linspace(0, 3, fineness)
-    elif name == 'τ_m':
-        #return sweep.logspace(0.003, 0.07, fineness)
-        return sweep.logspace(0.012, 0.035, fineness)
-    elif name == 'w':
-        #return sweep.linspace(-0.5, 0.5, fineness)
-        #return sweep.linspace(-0.5, 1.5, fineness)
-        return sweep.linspace(0, 1.5, fineness)
-    else:
-        raise NotImplementedError
+def get_param_stops(param, fineness):
+    if param.range_desc[0][:3] == 'lin':
+        return sweep.linspace(param.range_desc[1], param.range_desc[2], fineness)
+    elif param.range_desc[0] == 'log':
+        return sweep.logspace(param.range_desc[1], param.range_desc[2], fineness)
+# def get_sweep_param(name, index, fineness):
+#     # index is including so that ranges may depend on it
+#     if name == 'J_θ':
+#         return sweep.linspace(0, 3, fineness)
+#     elif name == 'τ_m':
+#         #return sweep.logspace(0.003, 0.07, fineness)
+#         return sweep.logspace(0.012, 0.035, fineness)
+#     elif name == 'w':
+#         #return sweep.linspace(-0.5, 0.5, fineness)
+#         #return sweep.linspace(-0.5, 1.5, fineness)
+#         return sweep.linspace(0, 1.5, fineness)
+#     else:
+#         raise NotImplementedError
 
 
 # def batch_Lgrad(model, wrt, start, stop):
@@ -624,9 +637,10 @@ def compile_sgd(sgd, fitparams, mbatch_size, **kwargs):
 
 
 
-def likelihood_sweep(param1, param2, fineness,
-                     burnin = 0.5, datalen = 4.0,
+def likelihood_sweep(#param1, param2, fineness,
+                     #burnin = 0.5, datalen = 4.0,
                      #mean_field_model = None,
+                     calc_params,
                      input_filename = None,
                      output_filename = None,
                      recalculate = False,
@@ -664,7 +678,9 @@ def likelihood_sweep(param1, param2, fineness,
     # TODO: clean up / make treatment of mfmodel consistent with other functions
     #if mfmodel is None:
     #    mfmodel = _BASENAME + '.dat'
-    mfmodel = derive_mf_model_from_spikes(input_filename, max_len=burnin+datalen)
+    mfmodel = derive_mf_model_from_spikes(
+        input_filename,
+        max_len=calc_params.burnin+calc_params.datalen)
 
     if isinstance(mfmodel, str):
         try:
@@ -694,15 +710,23 @@ def likelihood_sweep(param1, param2, fineness,
     #τ_sweep = sweep.logspace(0.0005, 0.5, fineness)     # wide
     #J_sweep = sweep.linspace(1, 5, fineness)  #3, 5
     #τ_sweep = sweep.logspace(0.003, 0.07, fineness)  # 0.01, 0.07
-    try:
-        if len(fineness) == 1:
-            fineness = list(fineness) * 2
-    except TypeError:
-        fineness = [fineness] * 2
-    param1_stops = get_sweep_param(param1[0], param1[1], fineness[0])
-    param2_stops = get_sweep_param(param2[0], param2[1], fineness[1])
-    param_sweep.add_param(param1[0], idx=param1[1], axis_stops=param1_stops)
-    param_sweep.add_param(param2[0], idx=param2[1], axis_stops=param2_stops)
+    if isinstance(calc_params.fineness, Iterable):
+        if len(calc_params.fineness) == 1:
+            fineness = list(calc_params.fineness) * 2
+        else:
+            fineness = calc_params.fineness
+    else:
+        fineness = [calc_params.fineness] * 2
+    # param1_stops = get_sweep_param(param1[0], param1[1], fineness[0])
+    # param2_stops = get_sweep_param(param2[0], param2[1], fineness[1])
+    param1 = calc_params.param1
+    param2 = calc_params.param2
+    param1_stops = get_param_stops(param1,
+                                   calc_params.fineness[0])
+    param2_stops = get_param_stops(param2,
+                                   calc_params.fineness[1])
+    param_sweep.add_param(param1.name, idx=param1.idx, axis_stops=param1_stops)
+    param_sweep.add_param(param2.name, idx=param2.idx, axis_stops=param2_stops)
 
     # param_sweep.set_function(mfmodel.get_loglikelihood(start=burnin,
     #                                                    stop=burnin+data_len),
@@ -710,8 +734,8 @@ def likelihood_sweep(param1, param2, fineness,
 
     # HACK: Defining the logL function with batches instead of one scan
     #mbatch_size=1
-    burnin_idx = mfmodel.get_t_idx(burnin, allow_rounding=True)
-    stop_idx = mfmodel.get_t_idx(burnin+datalen, allow_rounding=True)
+    burnin_idx = mfmodel.get_t_idx(calc_params.burnin, allow_rounding=True)
+    stop_idx = mfmodel.get_t_idx(calc_params.burnin+calc_params.datalen, allow_rounding=True)
 
     # HACK: Workaround for issue with `sinn`
     loaded['spiking model'].λ.name = 'spikeλ'
@@ -1048,35 +1072,69 @@ def plot_likelihood(loglikelihood_filename = None,
 #  and start the script with `pdb`)
 ###########################
 
-if __name__ == '__main__':
-    import multiprocessing
-    import itertools
-
-    _init_logging_handlers()
-    load_theano()
-    #generate_activity(4)
-    def f(burnin, datalen, seed):
+def do_likelihood_sweep(run_params):
+    def f(burnin, datalen, seed, run_params):
         global loaded
         if 'derived mf model' in loaded:
             del loaded['derived mf model']
-        likelihood_sweep(('w', (0,0)),
-                         ('τ_m', (1,)),
-                         fineness=(15,5),
-                         burnin=burnin,
-                         datalen=datalen,
-                         input_filename = 'data/short_adap/spikes/fsgif_sin-input_20s_{}seed'.format(seed),
-                         output_filename = 'data/short_adap/likelihoods/fsgif_sin-input_{}burnin_{}s_{}seed_loglikelihood_theano'.format(io.paramstr(burnin), io.paramstr(datalen), io.paramstr(seed)))
-                         #recalculate = recalculate,
-                         #ipp_url_file = ipp_url_file,
-                         #ipp_profile = ipp_profile
 
-    with multiprocessing.Pool(11) as pool:
-        burnins = range(6, 17)
-        burnins = [1]
-        datalens = [2]
-        seeds = [314]
-        pool.starmap(f, itertools.product(burnins, datalens, seeds))
+        calc = run_params.calculation
+        theanostr = "_theano" if run_params.sim.theano else ""
+        infilename = os.path.expanduser(run_params.sim.data_dir) + calc.input.format(seed)
+        outfilename = (os.path.expanduser(run_params.sim.data_dir) + calc.output_dir
+                       + "loglikelihood_no-input_{}burnin_{}s_{}seed"
+                         .format(io.paramstr(burnin), io.paramstr(datalen), io.paramstr(seed))
+                       + theanostr)
+        likelihood_sweep(#('w', (0,0)),
+                         #('τ_m', (1,)),
+                         #fineness=(15,5),
+                         #burnin=burnin,
+                         #datalen=datalen,
+                         calc,
+                         input_filename = infilename,
+                         output_filename = outfilename,
+                         # recalculate = recalculate,
+                         # ipp_url_file = ipp_url_file,
+                         # ipp_profile = ipp_profile
+                         )
+
+    burnins = run_params.calculation.burnin
+    if not isinstance(burnins, Iterable):
+        burnins = [burnins]
+    datalens = run_params.calculation.datalen
+    if not isinstance(datalens, Iterable):
+        datalens = [datalens]
+    seeds = run_params.calculation.seed
+    if not isinstance(seeds, Iterable):
+        seeds = [seeds]
+    with pathos.multiprocessing.ProcessPool(nodes=run_params.calculation.processes) as pool:
+        # burnins = range(6, 17)
+        # burnins = [1]
+        # datalens = [2]
+        # seeds = [314]
+        pool.map(f, *zip(*itertools.product(burnins, datalens, seeds, [run_params])))
         #pool.starmap(f, [(2, 314), (4, 314), (6, 314)])
+
+
+if __name__ == '__main__':
+    #import multiprocessing
+    import pathos
+    import itertools
+    import sys
+
+    _init_logging_handlers()
+
+    run_params = parameters.ParameterSet(sys.argv[1])
+
+    if run_params.sim.theano:
+        load_theano()
+
+    if run_params.calculation.type == 'generate activity':
+        generate_activity(run_params.calculation.burnin
+                          + run_params.calculation.datalen)
+    elif run_params.calculation.type == 'likelihood sweep':
+        do_likelihood_sweep(run_params)
+
 ##########################
 # cli interface
 ##########################
