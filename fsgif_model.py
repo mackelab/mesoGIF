@@ -743,17 +743,17 @@ class GIF_mean_field(models.Model):
     def get_memory_time(self, kernel, max_time=10):
         """
         Based on GetHistoryLength (p. 52). We set a global memory_time, rather
-        than a population specific one; this is much easier to vecorize.
+        than a population specific one; this is much easier to vectorize.
 
         Parameters
         ----------
         max_time: float
             Maximum allowable memory time, in seconds.
         """
-        def evalT(x):
-            return (x.get_value() if shim.isshared(x)
-                    else x.eval() if shim.is_theano_variable(x)
-                    else x)
+        # def evalT(x):
+        #     return (x.get_value() if shim.isshared(x)
+        #             else x.eval() if shim.is_theano_variable(x)
+        #             else x)
 
         if shim.is_theano_object(kernel.eval(0)):
             t = shim.getT().dscalar('t')
@@ -1102,16 +1102,17 @@ class GIF_mean_field(models.Model):
         this term is instead included in the equation for h (Eq. 92). We follow the pseudocode here.
         """
         # FIXME: I'm pretty sure some time indices are wrong (should be ±1)
-        #τs_flat = self.params.τ_s.flatten()
-        #τm_flat = self.params.τ_m.flatten()
+        τ_m = self.params.τ_m.flatten()[:,np.newaxis]
+           # We have τ_sβ, but τ_mα. This effectively transposes τ_m
         red_factor_τm = shim.exp(-self.h_tot.dt/self.params.τ_m)
+        red_factor_τmT = shim.exp(-self.h_tot.dt/τ_m)
         red_factor_τs = shim.exp(-self.h_tot.dt/self.params.τ_s)
         return ( self.params.u_rest + self.params.R*self.I_ext[t] * (1 - red_factor_τm)
-                 + ( self.params.τ_m * (self.params.p * self.params.w) * self.params.N
+                 + ( τ_m * (self.params.p * self.params.w) * self.params.N
                        * (self.A_Δ[t]
                           + ( ( self.params.τ_s * red_factor_τs * ( self.y[t] - self.A_Δ[t] )
-                                - red_factor_τm * (self.params.τ_s * self.y[t] - self.params.τ_m * self.A_Δ[t]) )
-                              / (self.params.τ_s - self.params.τ_m) ) )
+                                - red_factor_τmT * (self.params.τ_s * self.y[t] - τ_m * self.A_Δ[t]) )
+                              / (self.params.τ_s - τ_m) ) )
                    ).sum(axis=-1) )
 
     def y_fn(self, t):
@@ -1342,14 +1343,16 @@ class GIF_mean_field(models.Model):
         yt = self.A_Δ[tidx+self.A_Δ.t0idx] + (y0 - self.A_Δ[tidx+self.A_Δ.t0idx]) * red_factor
 
         # htot
+        τ_mα = self.params.τ_m.flatten()[:,np.newaxis]
         red_factor_τm = shim.exp(-self.h_tot.dt/self.params.τ_m)
+        red_factor_τmT = shim.exp(-self.h_tot.dt/τ_mα)
         red_factor_τs = shim.exp(-self.h_tot.dt/self.params.τ_s)
         h_tot = ( self.params.u_rest + self.params.R*self.I_ext[tidx+self.I_ext.t0idx] * (1 - red_factor_τm)
-                 + ( self.params.τ_m * (self.params.p * self.params.w) * self.params.N
+                 + ( τ_mα * (self.params.p * self.params.w) * self.params.N
                        * (self.A_Δ[tidx+self.A_Δ.t0idx]
                           + ( ( self.params.τ_s * red_factor_τs * ( yt - self.A_Δ[tidx+self.A_Δ.t0idx] )
-                                - red_factor_τm * (self.params.τ_s * yt - self.params.τ_m * self.A_Δ[tidx+self.A_Δ.t0idx]) )
-                              / (self.params.τ_s - self.params.τ_m) ) )
+                                - red_factor_τmT * (self.params.τ_s * yt - τ_mα * self.A_Δ[tidx+self.A_Δ.t0idx]) )
+                              / (self.params.τ_s - τ_mα) ) )
                    ).sum(axis=-1) )
 
         # ht
