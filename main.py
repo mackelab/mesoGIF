@@ -7,6 +7,7 @@ author: Alexandre René
 
 import logging
 import os.path
+import sys
 import time
 import copy
 import numpy as np
@@ -89,6 +90,10 @@ spike_dt = None
 mf_dt = None
 ###########
 
+def load_parameters(filename):
+    global run_params
+    run_params = parameters.ParameterSet(filename)
+
 def get_params():
     global spike_dt, mf_dt
 
@@ -99,6 +104,11 @@ def get_params():
     spike_dt = run_params.sim.spike_dt
     mf_dt = run_params.sim.mf_dt
     memory_time = run_params.sim.memory_time  # Adjust according to τ
+
+    # Model parameters are stored as lists -> convert to arrays
+    run_params.model.replace_values( **{pname:np.array(pval)
+                                        for pname, pval
+                                        in run_params.model.parameters()} )
 
     # Generate the random connectivity
     #N = np.array((500, 100)) # No. of neurons in each pop
@@ -1120,11 +1130,10 @@ if __name__ == '__main__':
     #import multiprocessing
     import pathos
     import itertools
-    import sys
 
     _init_logging_handlers()
 
-    run_params = parameters.ParameterSet(sys.argv[1])
+    load_parameters(sys.argv[1])
 
     if run_params.sim.theano:
         load_theano()
