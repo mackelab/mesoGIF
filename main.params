@@ -3,5 +3,6 @@
 
   "sim": url("simdefault.params"),
 
-  "calculation": url("loglsweep.params")
+  #"calculation": url("loglsweep.params")
+  "calculation": url("generate.params")
 }

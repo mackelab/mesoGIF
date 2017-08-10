@@ -1,0 +1,8 @@
+{
+  "type": "generate activity",
+  "input": "short_adap/spikes/fsgif_no-input_20s_{}seed",
+  "output_dir": "data/short_adap/",
+  "burnin": 10,
+  "datalen": 4.0,
+  "seed": 314
+}
