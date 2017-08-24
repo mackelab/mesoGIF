@@ -108,6 +108,7 @@ class GIF_spiking(models.Model):
                                    ( 'τ_θ',    (config.floatX, None, True))
                                    ) )
     Parameters = sinn.define_parameters(Parameter_info)
+    State = namedtuple('State', ['u', 't_hat'])
 
 
     def __init__(self, params, spike_history, input_history,
@@ -175,12 +176,12 @@ class GIF_spiking(models.Model):
         if memory_time is None:
             memory_time = 0
         self.memory_time = max(memory_time,
-                          max( kernel.memory_time
-                               for kernel in [self.ε, self.θ1, self.θ2] ) )
+                               max( kernel.memory_time
+                                    for kernel in [self.ε, self.θ1, self.θ2] ) )
         self.s.pad(self.memory_time)
         # Pad because these are ODEs (need initial condition)
-        self.u.pad(1)
-        self.t_hat.pad(1)
+        #self.u.pad(1)
+        #self.t_hat.pad(1)
 
         # Expand the parameters to treat them as neural parameters
         # Original population parameters are kept as a copy
@@ -192,17 +193,19 @@ class GIF_spiking(models.Model):
             u_r = self.expand_param(self.params.u_r, self.params.N)
         )
 
-        # Initialize last spike time such that it was effectively "at infinity"
-        idx = self.t_hat.t0idx - 1; assert(idx >= 0)
-        data = self.t_hat._data.get_value(borrow=True)
-        data[idx, :] = shim.ones(self.t_hat.shape) * self.memory_time * self.t_hat.dt
-        self.t_hat._data.set_value(data, borrow=True)
+        self.init_state_vars('stationary')
 
-        # Initialize membrane potential to u_rest
-        idx = self.u.t0idx - 1; assert(idx >= 0)
-        data = self.t_hat._data.get_value(borrow=True)
-        data[idx, :] = self.expanded_params.u_rest
-        self.u._data.set_value(data, borrow=True)
+        # # Initialize last spike time such that it was effectively "at infinity"
+        # idx = self.t_hat.t0idx - 1; assert(idx >= 0)
+        # data = self.t_hat._data.get_value(borrow=True)
+        # data[idx, :] = shim.ones(self.t_hat.shape) * self.memory_time #* self.t_hat.dt
+        # self.t_hat._data.set_value(data, borrow=True)
+
+        # # Initialize membrane potential to u_rest
+        # idx = self.u.t0idx - 1; assert(idx >= 0)
+        # data = self.t_hat._data.get_value(borrow=True)
+        # data[idx, :] = self.expanded_params.u_rest
+        # self.u._data.set_value(data, borrow=True)
 
         # self.params = Parameters(
         #     N = self.params.N,
@@ -216,6 +219,77 @@ class GIF_spiking(models.Model):
         #     c = self.expand_param(self.params.c),
         #     Δu =
 
+    def init_state_vars(self, initializer='stationary'):
+
+        if initializer == 'stationary':
+            K = np.rint( self.memory_time / self.dt ).astype(int)
+            θ_dis, θtilde_dis = GIF_mean_field.discretize_θkernel(
+                [self.θ1, self.θ2], self.A, self.params)
+            init_A = GIF_mean_field.get_stationary_activity(
+                self, K, θ_dis, θtilde_dis)
+            init_state = self.get_stationary_state(init_A)
+        elif initializer == 'silent':
+            init_A = np.zeros((len(self.s.pop_slices),))
+            init_state = self.get_silent_state()
+        else:
+            raise ValueError("Initializer string must be one of 'stationary', 'silent'")
+
+        for varname in self.State._fields:
+            hist = getattr(self, varname)
+            initval = getattr(init_state, varname)
+            hist.pad(1)
+            idx = hist.t0idx - 1; assert(idx >= 0)
+            data = hist._data.get_value(borrow=True)
+            data[idx,:] = initval
+            hist._data.set_value(data, borrow=True)
+
+        # TODO: Combine the following into the loop above
+        nbins = self.s.t0idx
+        data[:nbins,:] = init_state.s
+        self.s._data.set_value(data, borrow=True)
+
+    def get_silent_state(self):
+        # TODO: include spikes in model state, so we don't need this custom 'Stateplus'
+        Stateplus = namedtuple('Stateplus', self.State._fields + ('s',))
+        state = Stateplus(
+            u = self.expanded_params.u_rest,
+            t_hat = shim.ones(self.t_hat.shape) * self.memory_time,
+            s = np.zeros((self.s.t0idx, self.s.shape[0]))
+            )
+        return state
+
+    def get_stationary_state(self, Astar):
+        # TODO: include spikes in model state, so we don't need this custom 'Stateplus'
+        Stateplus = namedtuple('Stateplus', self.State._fields + ('s',))
+        # Initialize the spikes
+        # We treat that as a Bernouilli process, with firing rate
+        # given by init_A; this means ISI statistics will be off as
+        # we ignore refractory effects, but the overall rate will be
+        # correct.
+        p = self.expand_param(init_A, self.params.N) * self.dt
+        nbins = self.s.t0idx
+        nneurons = self.s.shape[0]
+        s = np.random.bernouilli(1, p, (nbins, nneurons))
+        # argmax returns first occurrence; by flipping s, we get the
+        # index (from the end) of the last spike, i.e. number of bins - 1
+        t_hat = (s[::-1].argmax(axis=0) + 1) * self.dt
+        # u is initialized by integrating the ODE from the last spike
+        # See documentation for details (TODO: not yet in docs)
+        τm_exp = self.expand_param(self.params.τ_m)
+        τmT = self.params.τ_m.flatten()[:, np.axis]
+        η1 = τmT * self.params.p * self.params.N * self.params.w
+            # As in GIF_mean_field.get_η_csts
+        u = np.where(t_hat <= self.expanded_params.t_ref,
+                     self.expanded_params.u_r,
+                     (1 - np.exp(-t_hat/τm_exp)) * (self.params.u_rest + η1.dot(Astar))
+                       + self.expanded_params.u_r * np.exp(-t_hat/τm_exp)
+                     )
+        state = Stateplus(
+            u = u
+            t_hat = t_hat,
+            s = s
+        )
+        return state
 
     @staticmethod
     def make_connectivity(N, p):
@@ -470,10 +544,16 @@ class GIF_mean_field(models.Model):
     Parameter_info = GIF_spiking.Parameter_info
     Parameters = sinn.define_parameters(Parameter_info)
 
+    # 'State' is an irreducible set of variables which uniquely define the model's state
     State = namedtuple('State',
-                       ['h', 'h_tot', 'u', 'varθ', 'varθfree',
+                       ['h', 'u',
                         'λ', 'λfree',
-                        'm', 'v', 'x', 'z'])
+                        'g', 'm', 'v', 'x', 'y', 'z'])
+        # TODO: Some way of specifying how much memory is needed for each variable
+        #       Or get this directly from the update functions, by some kind of introspection ?
+    # HACK For propagating gradients without scan
+    #      Order must be consistent with return value of symbolic_update
+    #statevars = [ 'λfree', 'λ', 'g', 'h', 'u', 'v', 'm', 'x', 'y', 'z' ]
 
     def __init__(self, params, activity_history, input_history,
                  random_stream=None, memory_time=None):
@@ -541,7 +621,7 @@ class GIF_mean_field(models.Model):
         # Temporary variables
         self.nbar = Series(self.n, 'nbar')
         self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops))
-        self.A_Δ.pad(1)  # +1 HACK (safety)
+        #self.A_Δ.pad(1)  # +1 HACK (safety)
         #self.g = Series(self.A, 'g', shape=(self.Npops, self.Nθ,))
         self.g = Series(self.A, 'g', shape=(self.Npops,))  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
 
@@ -568,8 +648,13 @@ class GIF_mean_field(models.Model):
         self.Z = Series(self.X, 'Z')
         self.W = Series(self.X, 'W')
 
+        # HACK For propagating gradients without scan
+        #      Order must be consistent with return value of symbolic_update
+        self.statehists = [ getattr(self, varname) for varname in self.State._fields ]
+
+
         # Initialize the variables
-        self.init_populations()
+        self.init_state_vars('stationary')
         # self.θtilde                                                     # QR kernel, computed from θ
         # self.θhat                                                       # convolution of θtilde with n up to t_n (for t_n > t - self.K)
 
@@ -705,10 +790,6 @@ class GIF_mean_field(models.Model):
         #     logger.info("Done.")
 
 
-        # HACK For propagating gradients without scan
-        #      Order must be consistent with return value of symbolic_update
-        self.statevars = [ self.λfree, self.λ, self.g, self.h, self.u, self.v, self.m, self.x, self.y, self.z ]
-
     def given_A(self):
         """Run this function when A is given data. It reverses the dependency
         n -> A to A -> n and fills the n array
@@ -776,77 +857,24 @@ class GIF_mean_field(models.Model):
         K = self.index_interval(T)
         return T, K
 
-    def init_populations(self):
+    def init_state_vars(self, initializer='stationary'):
         """
-        Based on InitPopulations (p. 52)
+        Originally based on InitPopulations (p. 52)
+
+        Parameters
+        ----------
+        initializer: str
+            One of
+              - 'stationary': (Default) Stationary state under no input conditions.
+              - 'silent': The last firing time of each neuron is set to -∞. Very artificial
+                condition, that may require a long burnin time to remove the transient.
 
         TODO: Call this every time the model is updated
         """
         # FIXME: Initialize series' to 0
 
-        ## Create discretized kernels
-        # TODO: Once kernels can be combined, can just
-        #       use A's discretize_kernel method
-        # FIXME: Check with p.52, InitPopulations – pretty sure the indexing isn't quite right
-        self.θ_dis = Series(self.A, 'θ_dis',
-                            t0 = self.dt,
-                            tn = self.θ2.memory_time+self.dt)
-            # Starts at dt because memory buffer does not include current time
-        self.θ_dis.set_update_function(
-            lambda t: self.θ1.eval(t) + self.θ2.eval(t) )
-        # HACK Currently we only support updating by one histories timestep
-        #      at a time (Theano), so for kernels (which are fully computed
-        #      at any time step), we index the underlying data tensor
-        self.θ_dis.set()
-        # HACK θ_dis updates should not be part of the loglikelihood's computational graph
-        #      but 'already there'
-        if shim.is_theano_object(self.θ_dis._data):
-            if self.θ_dis._original_data in shim.config.theano_updates:
-                #self.θ_dis._data = shim.config.theano_updates[self.θ_dis._original_data]
-                del shim.config.theano_updates[self.θ_dis._original_data]
-            if self.θ_dis._original_tidx in shim.config.theano_updates:
-                #self.θ_dis._cur_tidx = shim.config.theano_updates[self.θ_dis._original_tidx]
-                del shim.config.theano_updates[self.θ_dis._original_tidx]
-
-        # TODO: Use operations
-        self.θtilde_dis = Series(self.θ_dis, 'θtilde_dis',)
-        # HACK Proper way to ensure this would be to specify no. of bins (instead of tn) to history constructor
-        if len(self.θ_dis) != len(self.θtilde_dis):
-            self.θtilde_dis._tarr = copy.copy(self.θ_dis._tarr)
-            self.θtilde_dis._original_data.set_value(shim.zeros_like(self.θ_dis._original_data.get_value()))
-            self.θtilde_dis._data = self.θtilde_dis._original_data
-            self.θtilde_dis.tn = self.θtilde_dis._tarr[-1]
-            self.θtilde_dis._unpadded_length = len(self.θtilde_dis._tarr)
-        # HACK θ_dis._data should be θ_dis; then this can be made a lambda function
-        def θtilde_upd_fn(t):
-            tidx = self.θ_dis.get_t_idx(t)
-            return self.params.Δu * (1 - shim.exp(-self.θ_dis._data[tidx]/self.params.Δu) ) / self.params.N
-        self.θtilde_dis.set_update_function(θtilde_upd_fn)
-        # self.θtilde_dis.set_update_function(
-        #     lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis._data[t]/self.params.Δu) ) / self.params.N )
-        self.θtilde_dis.add_inputs([self.θ_dis])
-        # HACK Currently we only support updating by one histories timestep
-        #      at a time (Theano), so for kernels (which are fully computed
-        #      at any time step), we index the underlying data tensor
-        self.θtilde_dis.set()
-        # HACK θ_dis updates should not be part of the loglikelihood's computational graph
-        #      but 'already there'
-        if shim.is_theano_object(self.θtilde_dis._data):
-            if self.θtilde_dis._original_data in shim.config.theano_updates:
-                #self.θtilde_dis._data = shim.config.theano_updates[self.θtilde_dis._original_data]
-                del shim.config.theano_updates[self.θtilde_dis._original_data]
-            if self.θtilde_dis._original_tidx in shim.config.theano_updates:
-                #self.θ_dis._cur_tidx = shim.config.theano_updates[self.θ_dis._original_tidx]
-                del shim.config.theano_updates[self.θtilde_dis._original_tidx]
-
-        ## Initialize variables that are defined through an ODE
-        for series in [self.n, self.m, self.u, self.v, self.λ, self.P_λ]:
-            series.pad(1)
-            #series._data[0,:] = 0
-        for var_series in [self.Pfree, self.P_λ, self.λfree,
-                           self.x, self.z, self.h,
-                           self.g, self.y]:
-            var_series.pad(1)
+        self.θ_dis, self.θtilde_dis = self.discretize_θkernel(
+            [self.θ1, self.θ2], self.A, self.params)
 
         # Pad the the series involved in adaptation
         max_mem = self.u.shape[0]
@@ -861,6 +889,18 @@ class GIF_mean_field(models.Model):
         self.θtilde_dis.locked = True
         # <<<<<
 
+        # ====================
+        # Initialize state variables
+
+        if initializer == 'stationary':
+            init_A = self.get_stationary_activity(self, self.K, self.θ_dis, self.θtilde_dis)
+            init_state = self.get_stationary_state(init_A)
+        elif initializer == 'silent':
+            init_A = np.zeros(self.A.shape)
+            init_state = self.get_silent_state()
+        else:
+            raise ValueError("Initializer string must be one of 'stationary', 'silent'")
+
         # Set initial values (make sure this is done after all padding is added)
 
         # ndata = self.n._data.get_value(borrow=True)
@@ -870,26 +910,44 @@ class GIF_mean_field(models.Model):
         # mdata[0, -1, :] = self.params.N
         # self.m._data.set_value(mdata, borrow=True)
 
-        # Make all neurons free neurons
-        idx = self.x.t0idx - 1; assert(idx >= 0)
-        data = self.x._data.get_value(borrow=True)
-        data[idx,:] = self.params.N.get_value()
-        self.x._data.set_value(data, borrow=True)
+        for varname in self.State._fields:
+            hist = getattr(self, varname)
+            initval = getattr(init_state, varname)
+            hist.pad(1)  # Ensure we have at least one bin for the initial value
+                # TODO: Allow longer padding
+            idx = hist.t0idx - 1; assert(idx >= 0)
+            data = hist._data.get_value(borrow=True)
+            data[idx,:] = initval
+            hist._data.set_value(data, borrow=True)
 
-        # Set refractory membrane potential to u_rest
-        idx = self.u.t0idx - 1; assert(idx >= 0)
-        data = self.u._data.get_value(borrow=True)
-        data[idx,:] = self.params.u_rest.get_value()
-        self.u._data.set_value(data, borrow=True)
+        # TODO: Make A a state variable and just use the above code
+        data = self.A._data.get_value(borrow=True)
+        data[:self.A.t0idx,:] = init_A
+        self.A._data.set_value(data, borrow=True)
 
-        # Set free membrane potential to u_rest
-        idx = self.h.t0idx - 1; assert(idx >= 0)
-        data = self.h._data.get_value(borrow=True)
-        data[idx,:] = self.params.u_rest.get_value()
-        self.h._data.set_value(data, borrow=True)
+        # # Make all neurons free neurons
+        # idx = self.x.t0idx - 1; assert(idx >= 0)
+        # data = self.x._data.get_value(borrow=True)
+        # data[idx,:] = self.params.N.get_value()
+        # self.x._data.set_value(data, borrow=True)
+
+        # # Set refractory membrane potential to u_rest
+        # idx = self.u.t0idx - 1; assert(idx >= 0)
+        # data = self.u._data.get_value(borrow=True)
+        # data[idx,:] = self.params.u_rest.get_value()
+        # self.u._data.set_value(data, borrow=True)
+
+        # # Set free membrane potential to u_rest
+        # idx = self.h.t0idx - 1; assert(idx >= 0)
+        # data = self.h._data.get_value(borrow=True)
+        # data[idx,:] = self.params.u_rest.get_value()
+        # self.h._data.set_value(data, borrow=True)
 
         #self.g_l.set_value( np.zeros((self.Npops, self.Nθ)) )
         #self.y.set_value( np.zeros((self.Npops, self.Npops)) )
+
+        # =============================
+        # Set the refractory mask
 
         # TODO: Use a switch here, so ref_mask can have a symbolic dependency on t_ref
         # Create the refractory mask
@@ -911,6 +969,77 @@ class GIF_mean_field(models.Model):
     #     stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
     #     for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
     #         self._advance_fn(i)
+
+    @staticmethod
+    def get_discretized_θkernel(θ, reference_hist, params):
+        """
+        Parameters
+        ----------
+        θ: kernel, or iterable of kernels
+            The kernel to discretize. If an iterable, its elements are summed.
+        reference_hist: History
+            The kernel will be discretized to be compatible with this history.
+            (E.g. it will use the same time step.)
+        params: namedtuple-like
+            Must have the following attributes: Δu, N
+        """
+        ## Create discretized kernels
+        # TODO: Once kernels can be combined, can just
+        #       use A's discretize_kernel method
+        # FIXME: Check with p.52, InitPopulations – pretty sure the indexing isn't quite right
+        if not isinstance(θ, Iterable):
+            θ = [θ]
+        memory_time = max(kernel.memory_time for kernel in θ)
+        dt = reference_hist.dt
+
+        θ_dis = Series(reference_hist, 'θ_dis',
+                       t0 = dt,
+                       tn = memory_time+self.dt)
+            # Starts at dt because memory buffer does not include current time
+        θ_dis.set_update_function(
+            lambda t: self.θ1.eval(t) + self.θ2.eval(t) )
+        # HACK Currently we only support updating by one histories timestep
+        #      at a time (Theano), so for kernels (which are fully computed
+        #      at any time step), we index the underlying data tensor
+        θ_dis.set()
+        # HACK θ_dis updates should not be part of the loglikelihood's computational graph
+        #      but 'already there'
+        if shim.is_theano_object(θ_dis._data):
+            if θ_dis._original_data in shim.config.theano_updates:
+                del shim.config.theano_updates[θ_dis._original_data]
+            if θ_dis._original_tidx in shim.config.theano_updates:
+                del shim.config.theano_updates[θ_dis._original_tidx]
+
+        # TODO: Use operations
+        θtilde_dis = Series(self.θ_dis, 'θtilde_dis')
+        # HACK Proper way to ensure this would be to specify no. of bins (instead of tn) to history constructor
+        if len(θ_dis) != len(θtilde_dis):
+            θtilde_dis._tarr = copy.copy(θ_dis._tarr)
+            θtilde_dis._original_data.set_value(shim.zeros_like(θ_dis._original_data.get_value()))
+            θtilde_dis._data = θtilde_dis._original_data
+            θtilde_dis.tn = θtilde_dis._tarr[-1]
+            θtilde_dis._unpadded_length = len(θtilde_dis._tarr)
+        # HACK θ_dis._data should be θ_dis; then this can be made a lambda function
+        def θtilde_upd_fn(t):
+            tidx = θ_dis.get_t_idx(t)
+            return params.Δu * (1 - shim.exp(-θ_dis._data[tidx]/params.Δu) ) / params.N
+        θtilde_dis.set_update_function(θtilde_upd_fn)
+        # self.θtilde_dis.set_update_function(
+        #     lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis._data[t]/self.params.Δu) ) / self.params.N )
+        θtilde_dis.add_inputs([θ_dis])
+        # HACK Currently we only support updating by one histories timestep
+        #      at a time (Theano), so for kernels (which are fully computed
+        #      at any time step), we index the underlying data tensor
+        θtilde_dis.set()
+        # HACK θ_dis updates should not be part of the loglikelihood's computational graph
+        #      but 'already there'
+        if shim.is_theano_object(θtilde_dis._data):
+            if θtilde_dis._original_data in shim.config.theano_updates:
+                del shim.config.theano_updates[θtilde_dis._original_data]
+            if θtilde_dis._original_tidx in shim.config.theano_updates:
+                del shim.config.theano_updates[θtilde_dis._original_tidx]
+
+        return θ_dis, θtilde_dis
 
     @staticmethod
     def get_stationary_activity(model, K, θ, θtilde):
@@ -991,13 +1120,13 @@ class GIF_mean_field(models.Model):
             return res.x
 
     @staticmethod
-    def get_η_csts(params, dt, K, θ, θtilde):
+    def get_η_csts(model, K, θ, θtilde):
         """
         Returns the tensor constants which, along with the stationary activity,
         allow calculating the stationary value of each state variable. See the notebook
         'docs/Initial_condition.ipynb' for their definitions.
 
-        Parameters
+        Parameters (not up to date)
         ----------
         params: Parameters instance
             Must be compatible with GIF_mean_field.Parameters
@@ -1008,6 +1137,10 @@ class GIF_mean_field(models.Model):
         θ, θtilde: Series
             Discretized kernels θ and θtilde.
         """
+
+        params = model.params
+        dt = model.dt
+
         # There are a number of factors K-1 below because the memory vector
         # doesn't include the first (current) bin
         Npop = len(params.N)
@@ -1040,25 +1173,45 @@ class GIF_mean_field(models.Model):
 
         return η
 
+    def get_silent_state(self):
+        K = self.varθ.shape[0]
+        state = self.State(
+            h = self.params.u_rest.get_value(),
+            #h_tot = np.zeros(self.h_tot.shape),
+            u = self.params.u_rest.get_value(),
+            #varθ = self.params.params.u_th + self.θ_dis.get_trace()[:K],
+            #varθfree = self.params.u_th,
+            λ = np.zeros(self.λ.shape),         # Clamp the rates to zero
+            λfree = np.zeros(self.λfree.shape), # idem
+            g = np.zeros(self.g.shape)
+            m = np.zeros(self.m.shape),
+            v = np.zeros(self.v.shape),
+            x = self.params.N,
+            y = self.zeros(self.y.shape)
+            z = np.zeros(self.v.shape)          # Clamped to zero
+            )
+
     def get_stationary_state(self, Astar):
 
-        η = self.get_η_csts(self.params, self.dt, self.K,
+        η = self.get_η_csts(self, self.K,
                             self.θ_dis, self.θtilde_dis)
         state = self.State(
             h = self.params.u_rest + η[0].dot(Astar),
-            h_tot = η[1].dot(Astar),
+            #h_tot = η[1].dot(Astar),
             u = η[2] + η[9].dot(Astar),
-            varθ = η[4] + η[5]*Astar,
-            varθfree = self.params.u_th + η[6]*Astar,
+            #varθ = η[4] + η[5]*Astar,
+            #varθfree = self.params.u_th + η[6]*Astar,
             λ = np.stack(
                   [ self.f(u) for u in η[8] + (η[9]*Astar).sum(axis=-1) - η[5]*Astar ] ),
             λfree = self.f(η[7] + η[0].dot(Astar) - η[6]*Astar),
             # The following quantities are set below
             #P = 0,
             #Pfree = 0,
+            g = Astar,
             m = 0,
             v = 0,
             x = 0,
+            y = Astar,
             z = 0
             )
 
@@ -1107,7 +1260,7 @@ class GIF_mean_field(models.Model):
                     return list(statevar_upds.values()), {}
 
                 outputs_info = []
-                for hist in self.statevars:
+                for hist in self.statehists:
                     outputs_info.append( hist._data[curtidx_var + hist.t0idx])
                     # HACK-y !!
                     if hist.name == 'v':
@@ -1129,12 +1282,12 @@ class GIF_mean_field(models.Model):
                 logger.info("Done.")
 
             curtidx = min( hist._original_tidx.get_value() - hist.t0idx
-                           for hist in self.statevars )
+                           for hist in self.statehists )
 
             if curtidx+1 < stopidx:
                 newvals = self._advance_fn(curtidx, stopidx)
                 # HACK: We change the history directly to avoid dealing with updates
-                for hist, newval in zip(self.statevars, newvals):
+                for hist, newval in zip(self.statehists, newvals):
                     valslice = slice(curtidx+1+hist.t0idx, stopidx+hist.t0idx)
 
                     data = hist._original_data.get_value(borrow=True)
@@ -1201,7 +1354,7 @@ class GIF_mean_field(models.Model):
             # Create the outputs_info list
             # First element is the loglikelihood, subsequent are aligned with input_vars
             outputs_info = [shim.cast(0, sinn.config.floatX)]
-            for hist in self.statevars:
+            for hist in self.statehists:
                 outputs_info.append( hist._data[startidx + hist.t0idx - 1] )
                 # HACK !!
                 if hist.name == 'v':
@@ -1505,18 +1658,33 @@ class GIF_mean_field(models.Model):
         # y0 = create_variable(self.y)
         # z0 = create_variable(self.z)
 
-        λfree0 = statevars[0]
-        λ0 = statevars[1]
+        # λfree0 = statevars[0]
+        # λ0 = statevars[1]
+        # #Pfree0 = statevars[2]
+        # #P_λ0 = statevars[3]
+        # g0 = statevars[2]
+        # h0 = statevars[3]
+        # u0 = statevars[4]
+        # v0 = statevars[5]
+        # m0 = statevars[6]
+        # x0 = statevars[7]
+        # y0 = statevars[8]
+        # z0 = statevars[9]
+
+        curstate = State(statevars)
+
+        λfree0 = curstate.λfree
+        λ0 = curstate.λ
         #Pfree0 = statevars[2]
         #P_λ0 = statevars[3]
-        g0 = statevars[2]
-        h0 = statevars[3]
-        u0 = statevars[4]
-        v0 = statevars[5]
-        m0 = statevars[6]
-        x0 = statevars[7]
-        y0 = statevars[8]
-        z0 = statevars[9]
+        g0 = curstate.g
+        h0 = curstate.h
+        u0 = curstate.u
+        v0 = curstate.v
+        m0 = curstate.m
+        x0 = curstate.x
+        y0 = curstate.y
+        z0 = curstate.z
 
         # shared constants
         tidx_n = tidx + self.n.t0idx
@@ -1622,46 +1790,72 @@ class GIF_mean_field(models.Model):
         # nbar
         nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
 
-        updates = OrderedDict((
-            (λfree0, λfreet),
-            (λ0, λt),
-            #(Pfree0, Pfreet),
-            #(P_λ0, P_λt),
-            (g0, gt),
-            (h0, ht),
-            (u0, ut),
-            (v0, vt),
-            (m0, mt),
-            (x0, xt),
-            (y0, yt),
-            (z0, zt)
-        ))
+        newstate = State(
+            h = ht,
+            u = ut,
+            λ = λt,
+            λfree = λfreet,
+            g = gt,
+            m = mt,
+            v = vt,
+            x = xt,
+            y = yt,
+            z = zt
+            )
 
-        input_vars = OrderedDict(( (self.λfree, λfree0),
-                                   (self.λ, λ0),
-                                   #(self.Pfree, Pfree0),
-                                   #(self.P_λ, P_λ0),
-                                   (self.g, g0),
-                                   (self.h, h0),
-                                   (self.u, u0),
-                                   (self.v, v0),
-                                   (self.m, m0),
-                                   (self.x, x0),
-                                   (self.y, y0),
-                                   (self.z, z0) ))
+        updates = OrderedDict( (getattr(curstate, key), getattr(newstate, key))
+                               for key in self.State._fields )
 
-        output_vars = OrderedDict(( (self.λfree, λfreet),
-                                    (self.λ, λt),
-                                    #(self.Pfree, Pfreet),
-                                    #(self.P_λ, P_λt),
-                                    (self.g, gt),
-                                    (self.h, ht),
-                                    (self.u, ut),
-                                    (self.v, vt),
-                                    (self.m, mt),
-                                    (self.x, xt),
-                                    (self.y, yt),
-                                    (self.z, zt),
-                                    (self.nbar, nbar) ))
+        # TODO: use the key string itself
+        input_vars = OrderedDict( (getattr(self, key), getattr(curstate, key))
+                                  for key in self.State._fields )
+
+        # Output variables contain updates to the state variables, as well as
+        # whatever other quantities we want to compute
+        output_vars = OrderedDict( (getattr(self, key), getattr(newstate, key))
+                                   for key in self.State._fields )
+        output_vars[self.nbar] = nbar
+
+        # updates = OrderedDict((
+        #     (λfree0, λfreet),
+        #     (λ0, λt),
+        #     #(Pfree0, Pfreet),
+        #     #(P_λ0, P_λt),
+        #     (g0, gt),
+        #     (h0, ht),
+        #     (u0, ut),
+        #     (v0, vt),
+        #     (m0, mt),
+        #     (x0, xt),
+        #     (y0, yt),
+        #     (z0, zt)
+        # ))
+
+        # input_vars = OrderedDict(( (self.λfree, λfree0),
+        #                            (self.λ, λ0),
+        #                            #(self.Pfree, Pfree0),
+        #                            #(self.P_λ, P_λ0),
+        #                            (self.g, g0),
+        #                            (self.h, h0),
+        #                            (self.u, u0),
+        #                            (self.v, v0),
+        #                            (self.m, m0),
+        #                            (self.x, x0),
+        #                            (self.y, y0),
+        #                            (self.z, z0) ))
+
+        # output_vars = OrderedDict(( (self.λfree, λfreet),
+        #                             (self.λ, λt),
+        #                             #(self.Pfree, Pfreet),
+        #                             #(self.P_λ, P_λt),
+        #                             (self.g, gt),
+        #                             (self.h, ht),
+        #                             (self.u, ut),
+        #                             (self.v, vt),
+        #                             (self.m, mt),
+        #                             (self.x, xt),
+        #                             (self.y, yt),
+        #                             (self.z, zt),
+        #                             (self.nbar, nbar) ))
 
         return updates, input_vars, output_vars
