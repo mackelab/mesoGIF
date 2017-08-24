@@ -463,7 +463,7 @@ def generate_activity(datalen, filename=None, autosave=True, recalculate=False, 
 
     sinn.flush_log_queue()
 
-    return mf_model
+    return loaded['mf model']
 
 ###########################
 # Data processing functions

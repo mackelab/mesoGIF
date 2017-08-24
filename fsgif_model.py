@@ -7,7 +7,8 @@ author: Alexandre René
 
 import numpy as np
 import scipy as sp
-from collections import namedtuple, OrderedDict
+from scipy.optimize import root
+from collections import namedtuple, OrderedDict, Iterable
 import logging
 import copy
 
@@ -469,6 +470,11 @@ class GIF_mean_field(models.Model):
     Parameter_info = GIF_spiking.Parameter_info
     Parameters = sinn.define_parameters(Parameter_info)
 
+    State = namedtuple('State',
+                       ['h', 'h_tot', 'u', 'varθ', 'varθfree',
+                        'λ', 'λfree',
+                        'm', 'v', 'x', 'z'])
+
     def __init__(self, params, activity_history, input_history,
                  random_stream=None, memory_time=None):
 
@@ -526,7 +532,7 @@ class GIF_mean_field(models.Model):
         self.n = Series(self.A, 'n')
         self.h = Series(self.A, 'h')
         self.h_tot = Series(self.A, 'h_tot')
-        self.u = Series(self.A, 'u', shape=(self.K+1, self.Npops))
+        self.u = Series(self.A, 'u', shape=(self.K, self.Npops))
             # self.u[t][0] is the array of membrane potentials at time t, at lag Δt, of each population
             # TODO: Remove +1: P_λ_fn doesn't need it anymore
         self.varθ = Series(self.u, 'varθ')
@@ -701,7 +707,7 @@ class GIF_mean_field(models.Model):
 
         # HACK For propagating gradients without scan
         #      Order must be consistent with return value of symbolic_update
-        self.statevars = [ self.λfree, self.λ, self.Pfree, self.P_λ, self.g, self.h, self.u, self.v, self.m, self.x, self.y, self.z ]
+        self.statevars = [ self.λfree, self.λ, self.g, self.h, self.u, self.v, self.m, self.x, self.y, self.z ]
 
     def given_A(self):
         """Run this function when A is given data. It reverses the dependency
@@ -906,6 +912,180 @@ class GIF_mean_field(models.Model):
     #     for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
     #         self._advance_fn(i)
 
+    @staticmethod
+    def get_stationary_activity(model, K, θ, θtilde):
+        """
+        Determine the stationary activity for these parameters by solving a
+        self-consistency equation. For details see the notebook
+        'docs/Initial_condition.ipynb'
+
+        We make this a static method to allow external calls. In particular,
+        this allows us to use this function to use this function in the
+        initialization of GIF_spiking.
+
+        TODO: Use get_η_csts rather than accessing parameters directly.
+
+        Parameters  (not up to date)
+        ----------
+        params: Parameters instance
+            Must be compatible with GIF_mean_field.Parameters
+        dt: float
+            Time step. Typically [mean field model].dt
+        K: int
+            Size of the memory vector. Typically [mean field model].K
+        θ, θtilde: Series
+            Discretized kernels θ and θtilde.
+        """
+
+        params = model.params
+        dt = model.dt
+        # TODO: Find something less ugly than the following. Maybe using np.vectorize ?
+        class F:
+            def __init__(self, model):
+                self.model = model
+            def __getitem__(self, α):
+                def _f(u):
+                    if isinstance(u, Iterable):
+                        return np.array([self.model.f(ui)[α] for ui in u])
+                    else:
+                        return self.model.f(u)[α]
+                return _f
+        f = F(model)
+
+        # Define the equation we need to solve
+        k_refs = np.rint(params.t_ref / dt).astype('int')
+        jarrs = [np.arange(k0, K) for k0 in k_refs]
+        memory_time = K * dt
+        def rhs(A):
+            a = lambda α: ( np.exp(-(jarrs[α]-k_refs[α]+1)*dt/params.τ_m[α]) * (params.u_r[α] - params.u_rest[α])
+                + params.u_rest[α] - params.u_th[α] - θ.get_trace()[k_refs[α]-1:K-1,α] )
+
+            b = lambda α: ( (1 - np.exp(-(jarrs[α]-k_refs[α]+1)*dt/params.τ_m[α]))[:,np.newaxis]
+                * params.τ_m[α] * params.p[α] * params.N * params.w[α] )
+
+            # TODO: remove params.N factor once it's removed in model
+            θtilde_dis = lambda α: θtilde.get_trace()[k_refs[α]-1:K-1,α] * params.N[α] # starts at j+1, ends at K incl.
+            c = lambda α: params.J_θ[0,α] * np.exp(-memory_time/params.τ_θ[0,α]) + dt * np.cumsum(θtilde_dis(α)[::-1])[::-1]
+
+            ap = lambda α: params.u_rest[α] - params.u_th[α]
+
+            bp = lambda α: (1 - np.exp(-dt/params.τ_m[α])) * params.τ_m[α] * params.p[α] * params.N * params.w[α]
+
+            cp = lambda α: params.J_θ[0,α] * np.exp(-memory_time/params.τ_θ[0,α])
+
+            return ( (k_refs + 1).astype(float)
+                    + np.array( [ np.exp(- f[α](a(α) + (b(α) * A).sum(axis=-1) - c(α)*A[α])[:-1].cumsum()*dt).sum()
+                                for α in range(len(params.N))])
+                    + np.array( [ ( np.exp(- f[α](a(α) + (b(α) * A).sum(axis=-1) - c(α)*A[α]).sum()*dt)
+                                / (1 - np.exp(-f[α](ap(α) + (bp(α)*A).sum(axis=-1) - cp(α)*A[α])*dt)) )
+                                for α in range(len(params.N)) ] ).flatten()
+                ) * A * dt - 1
+
+        # Solve the equation for A*
+        Aguess = np.ones(len(params.N)) * 10
+        res = root(rhs, Aguess)
+
+        if not res.success:
+            raise RuntimeError("Root-finding algorithm was unable to find a stationary activity.")
+        else:
+            return res.x
+
+    @staticmethod
+    def get_η_csts(params, dt, K, θ, θtilde):
+        """
+        Returns the tensor constants which, along with the stationary activity,
+        allow calculating the stationary value of each state variable. See the notebook
+        'docs/Initial_condition.ipynb' for their definitions.
+
+        Parameters
+        ----------
+        params: Parameters instance
+            Must be compatible with GIF_mean_field.Parameters
+        dt: float
+            Time step. Typically [mean field model].dt
+        K: int
+            Size of the memory vector. Typically [mean field model].K
+        θ, θtilde: Series
+            Discretized kernels θ and θtilde.
+        """
+        # There are a number of factors K-1 below because the memory vector
+        # doesn't include the first (current) bin
+        Npop = len(params.N)
+        τm = params.τ_m.flatten()
+        τmT = τm[:,np.newaxis]  # transposed τ_m
+        k_refs = np.rint(params.t_ref / dt).astype('int')
+        jarrs = [np.arange(k0, K+1) for k0 in k_refs]
+        memory_time = K*dt
+        η = []
+        η.append(τmT * params.p * params.N * params.w)  # η1
+        η.append( (1 - np.exp(-dt/τmT)) * η[0] )        # η2
+        η3 = np.empty((K, Npop))
+        for α in range(Npop):
+            red_factor = np.exp(-(jarrs[α]-k_refs[α]+1)*dt/params.τ_m[α])
+            η3[:k_refs[α]-1, α] = params.u_r[α]
+            η3[k_refs[α]-1:, α] = red_factor * (params.u_r[α] - params.u_rest[α]) + params.u_rest[α]
+        η.append(η3)
+        η4 = np.zeros((K, Npop))
+        for α in range(Npop):
+            η4[k_refs[α]-1:, α] = (1 - np.exp(- (jarrs[α] - k_refs[α] + 1)*dt / τm[α])) / (1 - np.exp(- dt / τm[α]))
+        η.append(η4)
+        η.append( params.u_th + θ.get_trace()[:K] )   # η5
+        # TODO: remove params.N factor once it's removed in model
+        η.append( params.J_θ * np.exp(-memory_time/params.τ_θ.flatten())
+                  + dt * params.N*np.cumsum(θtilde.get_trace()[K-1::-1], axis=0)[::-1] )   # η6
+        η.append( params.J_θ * np.exp(-memory_time/params.τ_θ.flatten()) )  # η7
+        η.append( params.u_rest - params.u_th )  # η8
+        η.append( η[2] - η[4] )  # η9
+        η.append( η[3][..., np.newaxis] * η[1] )  # η10
+
+        return η
+
+    def get_stationary_state(self, Astar):
+
+        η = self.get_η_csts(self.params, self.dt, self.K,
+                            self.θ_dis, self.θtilde_dis)
+        state = self.State(
+            h = self.params.u_rest + η[0].dot(Astar),
+            h_tot = η[1].dot(Astar),
+            u = η[2] + η[9].dot(Astar),
+            varθ = η[4] + η[5]*Astar,
+            varθfree = self.params.u_th + η[6]*Astar,
+            λ = np.stack(
+                  [ self.f(u) for u in η[8] + (η[9]*Astar).sum(axis=-1) - η[5]*Astar ] ),
+            λfree = self.f(η[7] + η[0].dot(Astar) - η[6]*Astar),
+            # The following quantities are set below
+            #P = 0,
+            #Pfree = 0,
+            m = 0,
+            v = 0,
+            x = 0,
+            z = 0
+            )
+
+        λprev = np.concatenate(
+            ( np.zeros((1,) + state.λ.shape[1:]),
+              state.λ[:-1] )  )
+        P = 1 - np.exp(-(state.λ+λprev)/2 *self.dt)
+        Pfree = 1 - np.exp(-state.λfree*self.dt)
+
+        m = np.empty((self.K, self.Npops))
+        v = np.empty((self.K, self.Npops))
+        m[0] = Astar * self.params.N * self.dt
+        v[0, ...] = 0
+        for i in range(1, self.K):
+            m[i] = (1 - P[i])*m[i-1]
+            v[i] = (1 - P[i])**2 * v[i-1] + P[i] * m[i-1]
+        x = m[-1] / Pfree
+        z = (x + v[-1]/Pfree) / (2 - Pfree)
+        state = state._replace(
+            m = m,
+            v = v,
+            x = x,
+            z = z
+            )
+
+        return state
+
     def advance(self, stop):
 
         stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
@@ -1101,7 +1281,7 @@ class GIF_mean_field(models.Model):
         Note that the pseudocode on p. 52 includes the u_rest term, whereas in Eq. 94
         this term is instead included in the equation for h (Eq. 92). We follow the pseudocode here.
         """
-        # FIXME: I'm pretty sure some time indices are wrong (should be ±1)
+        # FIXME: Check again that indices are OK (i.e. should they be ±1 ?)
         τ_m = self.params.τ_m.flatten()[:,np.newaxis]
            # We have τ_sβ, but τ_mα. This effectively transposes τ_m
         red_factor_τm = shim.exp(-self.h_tot.dt/self.params.τ_m)
@@ -1174,9 +1354,10 @@ class GIF_mean_field(models.Model):
         #    K = shim.print(K, "K : ")
         #θtilde = shim.print(self.θtilde_dis._data, "θtilde data")  # DEBUG
         # HACK: use of ._data to avoid indexing θtilde (see comment where it is created)
-        varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
+        # TODO: Exclude the last element from the sum, rather than subtracting it.
+        varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
-                    - shim.addbroadcast(self.n[tidx_n-K]*self.θtilde_dis._data[K-1:K], -2) )[...,::-1,:]
+                    - self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:])[...,::-1,:]
         # FIXME: Use indexing that is robust to θtilde_dis' t0idx
         # FIXME: Check that this is really what line 15 says
         return self.θ_dis._data[:K] + self.varθfree[t] + varθref
@@ -1199,7 +1380,10 @@ class GIF_mean_field(models.Model):
         """p.53, line 19"""
         tidx_λ = self.λ.get_t_idx(t)
         self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
-        P_λ = 0.5 * (self.λ[tidx_λ][:-1] + self.λ[tidx_λ-1][:-1]) * self.P_λ.dt
+        λprev = np.concatenate(
+            ( np.zeros((1,) + self.λ.shape[1:]),
+              self.λ[tidx_λ-1][:-1] )  )
+        P_λ = 0.5 * (self.λ[tidx_λ][:] + λprev) * self.P_λ.dt
         return shim.switch(P_λ <= 0.01,
                            P_λ,
                            1 - shim.exp(-P_λ))
@@ -1235,12 +1419,12 @@ class GIF_mean_field(models.Model):
     def v_fn(self, t):
         """p.53, line 25 and 34"""
         tidx_v = self.v.get_t_idx(t)
-        #tidx_m = self.m.get_t_idx(t)
+        tidx_m = self.m.get_t_idx(t)
         return shim.concatenate(
-            ( shim.zeros(self.v.shape[:-1] + (1,), dtype=sinn.config.floatX),
-              ((1 - self.P_λ[t])**2 * self.v[tidx_v-1] + self.P_λ[t] * self.m[t])[...,:-1]
+            ( shim.zeros( (1,) + self.v.shape[1:], dtype=sinn.config.floatX),
+              (1 - self.P_λ[t][1:])**2 * self.v[tidx_v-1][:-1] + self.P_λ[t][1:] * self.m[tidx_m-1][:-1]
             ),
-            axis=-1)
+            axis=-2)
 
     def m_fn(self, t):
         """p.53, line 26 and 33"""
@@ -1250,9 +1434,9 @@ class GIF_mean_field(models.Model):
         # TODO: update m_0 with n(t)
         return shim.concatenate(
             ( self.n[tidx_n-1][np.newaxis,:],
-              ((1 - self.P_λ._data[tidx_Pλ-1][:-1]) * self.m[tidx_m-1][:-1]) ),
+              ((1 - self.P_λ._data[tidx_Pλ][1:]) * self.m[tidx_m-1][:-1]) ),
             axis=-2 )
-            # HACK: Index P_λ data directly to avoid triggering it's computational udate before v_fn
+            # HACK: Index P_λ data directly to avoid triggering its computational update before v_fn
 
     def P_Λ_fn(self, t):
         """p.53, line 28"""
@@ -1278,22 +1462,21 @@ class GIF_mean_field(models.Model):
     def z_fn(self, t):
         """p.53, line 31"""
         tidx_x = self.x.get_t_idx(t)
-        tidx_v = self.v.get_t_idx(t)
+        #tidx_v = self.v.get_t_idx(t)
         tidx_z = self.z.get_t_idx(t)
         return ( (1 - self.Pfree[t])**2 * self.z[tidx_z-1]
                  + self.Pfree[t]*self.x[tidx_x-1]
-                 + self.v[tidx_v - 1][0] )
+                 + self.v[t][0] )
 
     def x_fn(self, t):
         """p.53, line 32"""
         tidx_x = self.x.get_t_idx(t)
         tidx_m = self.m.get_t_idx(t)
         tidx_P = self.Pfree.get_t_idx(t)
-        tidx_Pλ = self.P_λ.get_t_idx(t)
         # TODO: ensure that m can be used as single time buffer, perhaps
         #       by merging the second line with m_fn update ?
-        return ( (1 - self.Pfree[tidx_P-1]) * self.x[tidx_x-1]
-                 + (1 - self.P_λ._data[tidx_Pλ-1][-1])*self.m._data[tidx_m-1][-1] )
+        return ( (1 - self.Pfree[tidx_P]) * self.x[tidx_x-1]
+                 + self.m._data[tidx_m][-1] )
             # HACK: Index P_λ, m _data directly to avoid triggering it's computational udate before v_fn
 
 
@@ -1324,16 +1507,16 @@ class GIF_mean_field(models.Model):
 
         λfree0 = statevars[0]
         λ0 = statevars[1]
-        Pfree0 = statevars[2]
-        P_λ0 = statevars[3]
-        g0 = statevars[4]
-        h0 = statevars[5]
-        u0 = statevars[6]
-        v0 = statevars[7]
-        m0 = statevars[8]
-        x0 = statevars[9]
-        y0 = statevars[10]
-        z0 = statevars[11]
+        #Pfree0 = statevars[2]
+        #P_λ0 = statevars[3]
+        g0 = statevars[2]
+        h0 = statevars[3]
+        u0 = statevars[4]
+        v0 = statevars[5]
+        m0 = statevars[6]
+        x0 = statevars[7]
+        y0 = statevars[8]
+        z0 = statevars[9]
 
         # shared constants
         tidx_n = tidx + self.n.t0idx
@@ -1380,7 +1563,7 @@ class GIF_mean_field(models.Model):
         K = self.u.shape[0]
         varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
-                    - shim.addbroadcast(self.n[tidx_n-K]*self.θtilde_dis._data[K-1:K], -2) )[...,::-1,:]
+                              - self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K])[...,::-1,:]
         varθ = self.θ_dis._data[:K] + varθfree + varθref
 
         # λt
@@ -1390,32 +1573,35 @@ class GIF_mean_field(models.Model):
         λfreet = self.f(ht - varθfree[0])
 
         # Pfreet
-        Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet) * self.Pfree.dt )
+        Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet) * self.λfree.dt )
 
         # P_λt
-        P_λ_tmp = 0.5 * (λt[:-1] + λ0[:-1]) * self.P_λ.dt
+        λprev = shim.concatenate(
+            ( shim.zeros((1,) + self.λ.shape[1:]),
+              λ0[:-1] ) )
+        P_λ_tmp = 0.5 * (λt + λprev) * self.P_λ.dt
         P_λt = shim.switch(P_λ_tmp <= 0.01,
                            P_λ_tmp,
                            1 - shim.exp(-P_λ_tmp))
         # mt
         mt = shim.concatenate(
-            ( self.n[tidx_n-1][np.newaxis,:], ((1 - P_λ0[:-1]) * m0[:-1]) ),
+            ( self.n[tidx_n-1][np.newaxis,:], ((1 - P_λt[1:]) * m0[:-1]) ),
             axis=-2 )
 
         # X
         X = mt.sum(axis=-2)
 
         # xt
-        xt = ( (1 - Pfree0) * x0 + (1 - P_λ0[-1])*m0[-1] )
+        xt = ( (1 - Pfreet) * x0 + mt[-1] )
 
         # zt
-        zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + v0[0] )
+        zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + vt[0] )
 
         # vt
         vt = shim.concatenate(
-            ( shim.zeros(self.v.shape[:-1] + (1,), dtype=sinn.config.floatX),
-              ((1 - P_λt)**2 * v0 + P_λt * mt)[...,:-1] ),
-            axis=-1)
+            ( shim.zeros( (1,) + self.v.shape[1:] , dtype=sinn.config.floatX),
+              (1 - P_λt[1:])**2 * v0[:-1] + P_λt[1:] * m0[:-1] ),
+            axis=-2)
 
         # W
         Wref_mask = self.ref_mask[:self.m.shape[0],:]
@@ -1439,8 +1625,8 @@ class GIF_mean_field(models.Model):
         updates = OrderedDict((
             (λfree0, λfreet),
             (λ0, λt),
-            (Pfree0, Pfreet),
-            (P_λ0, P_λt),
+            #(Pfree0, Pfreet),
+            #(P_λ0, P_λt),
             (g0, gt),
             (h0, ht),
             (u0, ut),
@@ -1453,8 +1639,8 @@ class GIF_mean_field(models.Model):
 
         input_vars = OrderedDict(( (self.λfree, λfree0),
                                    (self.λ, λ0),
-                                   (self.Pfree, Pfree0),
-                                   (self.P_λ, P_λ0),
+                                   #(self.Pfree, Pfree0),
+                                   #(self.P_λ, P_λ0),
                                    (self.g, g0),
                                    (self.h, h0),
                                    (self.u, u0),
@@ -1466,8 +1652,8 @@ class GIF_mean_field(models.Model):
 
         output_vars = OrderedDict(( (self.λfree, λfreet),
                                     (self.λ, λt),
-                                    (self.Pfree, Pfreet),
-                                    (self.P_λ, P_λt),
+                                    #(self.Pfree, Pfreet),
+                                    #(self.P_λ, P_λt),
                                     (self.g, gt),
                                     (self.h, ht),
                                     (self.u, ut),
