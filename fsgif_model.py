@@ -285,7 +285,7 @@ class GIF_spiking(models.Model):
                        + self.expanded_params.u_r * np.exp(-t_hat/τm_exp)
                      )
         state = Stateplus(
-            u = u
+            u = u,
             t_hat = t_hat,
             s = s
         )
@@ -1183,11 +1183,11 @@ class GIF_mean_field(models.Model):
             #varθfree = self.params.u_th,
             λ = np.zeros(self.λ.shape),         # Clamp the rates to zero
             λfree = np.zeros(self.λfree.shape), # idem
-            g = np.zeros(self.g.shape)
+            g = np.zeros(self.g.shape),
             m = np.zeros(self.m.shape),
             v = np.zeros(self.v.shape),
             x = self.params.N,
-            y = self.zeros(self.y.shape)
+            y = self.zeros(self.y.shape),
             z = np.zeros(self.v.shape)          # Clamped to zero
             )
 
