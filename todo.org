@@ -1,0 +1,2 @@
+* [fsgif_model] Combine the "statevars" with the State namedtuple
+* [fsgif_model] Remove the N factor from θtilde_dis

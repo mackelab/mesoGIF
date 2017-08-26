@@ -1,0 +1,7 @@
+{
+    "theano": True,
+    "memory_time": 0.553,
+    "spike_dt": 0.0002,
+    "mf_dt": 0.001,
+    "data_dir": "~/Recherche/data/mackelab/sim/fsGIF/"
+  }
