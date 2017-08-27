@@ -83,8 +83,9 @@ spikes_subdir = "spikes"
 
 def get_filename(params):
     # We need a sorted dictionary of parameters, so that the hash is consistent
-    flat_params = params.flatten()
-        # Avoid needing to sort recursively
+    flat_params = _params_to_arrays(params).flatten()
+        # flatten avoids need to sort recursively
+        # _params_to_arrays normalizes the data
     sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
     return hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
 
