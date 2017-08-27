@@ -19,13 +19,13 @@ import parameters
 
 import theano_shim as shim
 
-try:
-    import matplotlib.pyplot as plt
-except ImportError:
-    logging.warning("Unable to import matplotlib. Plotting won't work.")
-    do_plots = False
-else:
-    do_plots = True
+# try:
+#     import matplotlib.pyplot as plt
+# except ImportError:
+#     logging.warning("Unable to import matplotlib. Plotting won't work.")
+#     do_plots = False
+# else:
+#     do_plots = True
 
 ############################
 # Basic configuration
@@ -49,9 +49,6 @@ def _init_logging_handlers():
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-_BASENAME = "fsgif"
-#sinn.config.set_floatX('float32')  # Hardcoded; must match theano's floatX
-
 def load_theano():
     """
     Run this function to use Theano for computations.
@@ -59,12 +56,14 @@ def load_theano():
     """
     shim.load_theano()
 
+rndstream = None
+stream_seed = None
 # Store loaded objects like model instances
-loaded = {}
-filenames = {}  # filenames of loaded objects which are also saved to disk
-params = {}
-compiled = {}
-run_params = None
+# loaded = {}
+# filenames = {}  # filenames of loaded objects which are also saved to disk
+# params = {}
+# compiled = {}
+# run_params = None
 
 ###########
 # Step sizes
@@ -76,7 +75,9 @@ run_params = None
 # Project manager
 ###########################
 
-output_dir = "data"
+data_dir = "data"
+input_subdir = "inputs"
+spikes_subdir = "spikes"
 
 def get_filename(params):
     # We need a sorted dictionary of parameters, so that the hash is consistent
@@ -86,18 +87,44 @@ def get_filename(params):
     return hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
 
 def get_pathname(subdir, params):
-    return os.path.normpath(output_dir + '/' + subdir) + '/' + get_filename(params)
+    return os.path.normpath(data_dir + '/' + subdir) + '/' + get_filename(params)
 
 ##########################
 # Parameters ?
 ##########################
 
 def load_parameters(filename):
-    global run_params
-    run_params = parameters.ParameterSet(filename)
+    """
+    Load a parameter file.
+    `np.array` is called on every non-string iterable parameter,
+    so that nested lists and tuples become Nd arrays.
+    """
+    params = parameters.ParameterSet(filename)
+    return _params_to_arrays(params)
+
+def _params_to_arrays(params):
+    for name, val in params.items():
+        if isinstance(val, parameters.ParameterSet):
+            params[name] = _params_to_arrays(val)
+        elif not isinstance(val, str) and isinstance(val, Iterable):
+            params[name] = np.array(val)
+    return params
+
+def get_random_stream(seed=314):
+    global rndstream, stream_seed
+    if rndstream is None:
+        rndstream = shim.config.RandomStreams(seed)
+        stream_seed = seed
+    else:
+        if seed == stream_seed:
+            pass
+            #logger.info("Tried to create a second random stream. Reusing the first.")
+        else:
+            logger.warning("Tried to obtain random stream with different seed than the current one. "
+                           "The current stream was returned nonetheless.")
+    return rndstream
 
 def get_params():
-    global spike_dt, mf_dt
 
     if run_params is None:
         # parameter_file is a global parameter

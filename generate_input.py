@@ -1,5 +1,4 @@
 import sys
-import os.path
 import inspect
 
 import parameters
@@ -13,7 +12,6 @@ import core
 class ParameterError(ValueError):
     pass
 
-input_subdir = "inputs"
 hist_types = { histname: histtype
                for histname, histtype in inspect.getmembers(sinn.history_functions)
                if inspect.isclass(histtype)
@@ -24,7 +22,7 @@ hist_types = { histname: histtype
 
 def generate_input(params):
 
-    rndstream = shim.config.RandomStreams(seed=params.seed)
+    rndstream = core.get_random_stream(params.seed)
 
     hists = {}
     for histname in params.inputs:
@@ -50,10 +48,10 @@ def generate_input(params):
     input_hist = simpleeval.simple_eval(params.eval, names=hists)
     input_hist.compute_up_to('end')
 
-    pathname = core.get_pathname(input_subdir, params)
+    pathname = core.get_pathname(core.input_subdir, params)
     sinn.iotools.saveraw(pathname, input_hist)
 
 
 if __name__ == "__main__":
-    params = parameters.ParameterSet(sys.argv[1])
+    params = core.load_parameters(sys.argv[1])
     generate_input(params)
