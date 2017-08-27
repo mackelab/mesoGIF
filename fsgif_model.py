@@ -114,6 +114,7 @@ class GIF_spiking(models.Model):
     def __init__(self, params, spike_history, input_history,
                  random_stream=None, memory_time=None):
 
+        self._refhist = spike_history
         self.s = spike_history
         self.I_ext = input_history
         self.rndstream = random_stream
@@ -224,7 +225,7 @@ class GIF_spiking(models.Model):
         if initializer == 'stationary':
             K = np.rint( self.memory_time / self.dt ).astype(int)
             θ_dis, θtilde_dis = GIF_mean_field.discretize_θkernel(
-                [self.θ1, self.θ2], self.A, self.params)
+                [self.θ1, self.θ2], self._refhist, self.params)
             init_A = GIF_mean_field.get_stationary_activity(
                 self, K, θ_dis, θtilde_dis)
             init_state = self.get_stationary_state(init_A)
@@ -245,8 +246,10 @@ class GIF_spiking(models.Model):
 
         # TODO: Combine the following into the loop above
         nbins = self.s.t0idx
-        data[:nbins,:] = init_state.s
-        self.s._data.set_value(data, borrow=True)
+        self.s.update(np.arange(nbins), [ np.nonzero(timebin)[0] for timebin in init_state.s ] )
+        #data = self.s._data
+        #data[:nbins,:] = init_state.s
+        #self.s._data.set_value(data, borrow=True)
 
     def get_silent_state(self):
         # TODO: include spikes in model state, so we don't need this custom 'Stateplus'
@@ -263,25 +266,26 @@ class GIF_spiking(models.Model):
         Stateplus = namedtuple('Stateplus', self.State._fields + ('s',))
         # Initialize the spikes
         # We treat that as a Bernouilli process, with firing rate
-        # given by init_A; this means ISI statistics will be off as
+        # given by Astar; this means ISI statistics will be off as
         # we ignore refractory effects, but the overall rate will be
         # correct.
-        p = self.expand_param(init_A, self.params.N) * self.dt
+        p = self.expand_param(Astar, self.params.N) * self.dt
         nbins = self.s.t0idx
         nneurons = self.s.shape[0]
-        s = np.random.bernouilli(1, p, (nbins, nneurons))
+        s = np.random.binomial(1, p, (nbins, nneurons))
         # argmax returns first occurrence; by flipping s, we get the
         # index (from the end) of the last spike, i.e. number of bins - 1
         t_hat = (s[::-1].argmax(axis=0) + 1) * self.dt
         # u is initialized by integrating the ODE from the last spike
         # See documentation for details (TODO: not yet in docs)
-        τm_exp = self.expand_param(self.params.τ_m)
-        τmT = self.params.τ_m.flatten()[:, np.axis]
+        τm_exp = self.expand_param(self.params.τ_m, self.params.N)
+        τmT = self.params.τ_m.flatten()[:, np.newaxis]
         η1 = τmT * self.params.p * self.params.N * self.params.w
             # As in GIF_mean_field.get_η_csts
         u = np.where(t_hat <= self.expanded_params.t_ref,
                      self.expanded_params.u_r,
-                     (1 - np.exp(-t_hat/τm_exp)) * (self.params.u_rest + η1.dot(Astar))
+                     (1 - np.exp(-t_hat/τm_exp)) * self.expand_param((self.params.u_rest + η1.dot(Astar)),
+                                                                     self.params.N)
                        + self.expanded_params.u_r * np.exp(-t_hat/τm_exp)
                      )
         state = Stateplus(
@@ -425,6 +429,12 @@ class GIF_spiking(models.Model):
 
             return logL, upd
 
+    def f(self, u):
+        """Link function. Maps difference between membrane potential & threshold
+        to firing rate."""
+        return self.params.c * shim.exp(u/self.params.Δu.flatten())
+
+
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
         return ( self.s.pop_rmul( self.params.τ_m,
@@ -473,6 +483,7 @@ class GIF_spiking(models.Model):
 
     def λ_fn(self, t):
         """Hazard rate. Eq. (23)."""
+        # TODO: Use self.f here (requires overloading of ops to remove pop_rmul & co.)
         return self.s.pop_rmul(self.params.c,
                                shim.exp( self.s.pop_div( ( self.u[t] - self.varθ[t] ),
                                                        self.params.Δu ) ) )
@@ -558,6 +569,7 @@ class GIF_mean_field(models.Model):
     def __init__(self, params, activity_history, input_history,
                  random_stream=None, memory_time=None):
 
+        self._refhist = activity_history
         self.A = activity_history
         self.I_ext = input_history
         self.rndstream = random_stream
@@ -572,9 +584,6 @@ class GIF_mean_field(models.Model):
 
         super().__init__(params)
         # NOTE: Do not use `params` beyond here. Always use self.params.
-
-        # Set model default attributes
-        self.dt = self.A.dt
 
         N = self.params.N.get_value()
         assert(N.ndim == 1)
@@ -971,7 +980,7 @@ class GIF_mean_field(models.Model):
     #         self._advance_fn(i)
 
     @staticmethod
-    def get_discretized_θkernel(θ, reference_hist, params):
+    def discretize_θkernel(θ, reference_hist, params):
         """
         Parameters
         ----------
@@ -994,10 +1003,10 @@ class GIF_mean_field(models.Model):
 
         θ_dis = Series(reference_hist, 'θ_dis',
                        t0 = dt,
-                       tn = memory_time+self.dt)
+                       tn = memory_time+reference_hist.dt)
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(
-            lambda t: self.θ1.eval(t) + self.θ2.eval(t) )
+            lambda t: sum( kernel.eval(t) for kernel in θ ) )
         # HACK Currently we only support updating by one histories timestep
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
@@ -1011,7 +1020,7 @@ class GIF_mean_field(models.Model):
                 del shim.config.theano_updates[θ_dis._original_tidx]
 
         # TODO: Use operations
-        θtilde_dis = Series(self.θ_dis, 'θtilde_dis')
+        θtilde_dis = Series(θ_dis, 'θtilde_dis')
         # HACK Proper way to ensure this would be to specify no. of bins (instead of tn) to history constructor
         if len(θ_dis) != len(θtilde_dis):
             θtilde_dis._tarr = copy.copy(θ_dis._tarr)

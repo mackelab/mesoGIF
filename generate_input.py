@@ -22,7 +22,8 @@ hist_types = { histname: histtype
 
 def generate_input(params):
 
-    rndstream = core.get_random_stream(params.seed)
+    seed = core.resolve_linked_param(params, 'seed')
+    rndstream = core.get_random_stream(seed)
 
     hists = {}
     for histname in params.inputs:
