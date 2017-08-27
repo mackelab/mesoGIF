@@ -1,0 +1,6 @@
+{
+  "model": url("model2pop.params"),
+  "input": url("input.params"),
+  # Can add t0, tn or dt parameters to change from input defaults
+  "tn": 4,
+}

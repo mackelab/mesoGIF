@@ -1,9 +1,0 @@
-{
-  "model": url("model2pop.params"),
-  "input": url("input.params"),
-
-  "sim": url("simdefault.params"),
-
-  #"calculation": url("loglsweep.params")
-  "calculation": url("generate.params")
-}

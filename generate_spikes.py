@@ -10,9 +10,9 @@ import fsgif_model as gif
 
 """
 Expected parameters format:
-{ 'input': [input_params],
-  'spikes': [spike_params],
-  'model: [model_params]
+{ 'input': {input_params},
+  'model': {model_params},
+  ['t0', 'tn', 'dt']
 }
 """
 
@@ -29,8 +29,9 @@ def generate_spikes(params):
     # Create the spiking model
     # We check if different run parameters were specified,
     # otherwise those from Ihist will be taken
-    runparams = { name: val for name in params.spikes
+    runparams = { name: val for name in params.items()
                    if name in ['t0', 'tn', 'dt'] }
+    # TODO: if dt different from Ihist, subsample Ihist
     shist = Spiketrain(Ihist, name='s', pop_sized = params.model.N,
                        **runparams)
     spiking_model = init_spiking_model(params.model, shist, Ihist, rndstream)
