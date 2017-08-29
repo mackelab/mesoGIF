@@ -437,7 +437,6 @@ class GIF_spiking(models.Model):
 
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
-        import pdb; pdb.set_trace()
         return ( self.s.pop_rmul( self.params.τ_m,
                                   self.s.convolve(self.ε, t) ) )
             # s includes the connection weights w, and convolution also includes
