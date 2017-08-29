@@ -36,6 +36,9 @@ def generate_activity(params):
     # GIF activity model
     mfmodel = gif.GIF_mean_field(model_params, Ahist, Ihist,
                                  params.initializer, rndstream)
+    # Generate the activity trace
+    Ahist.set()
+
     return mfmodel
 
 if __name__ == "__main__":
