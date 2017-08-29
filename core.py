@@ -15,10 +15,11 @@ import scipy as sp
 import collections
 from collections import namedtuple, OrderedDict, Iterable
 
-import parameters
-
 import theano_shim as shim
+import sinn
+import sinn.analyze as anlz
 
+import parameters as parameters
 import fsgif_model as gif
 
 # try:
@@ -80,6 +81,8 @@ stream_seed = None
 data_dir = "data"
 input_subdir = "inputs"
 spikes_subdir = "spikes"
+activity_subdir = "activity"
+likelihood_subdir = "likelihood"
 
 def get_filename(params):
     # We need a sorted dictionary of parameters, so that the hash is consistent
@@ -127,18 +130,18 @@ def get_random_stream(seed=314):
                            "The current stream was returned nonetheless.")
     return rndstream
 
-def resolve_linked_param(params, param_name):
-    """
-    Allow parameter values to refer to values defined in nested parameter sets.
-    Links are given by a string whose value is another key in the parameter set.
-    """
-    val = params[param_name]
-    if ( isinstance(val, str)
-         and val[-2:] == '->'
-         and val[:-2] in params ):
-        return resolve_linked_param(params[val[:-2]], param_name)
-    else:
-        return params[param_name]
+# def resolve_linked_param(params, param_name):
+#     """
+#     Allow parameter values to refer to values defined in nested parameter sets.
+#     Links are given by a string whose value is another key in the parameter set.
+#     """
+#     val = params[param_name]
+#     if ( isinstance(val, str)
+#          and val[-2:] == '->'
+#          and val[:-2] in params ):
+#         return resolve_linked_param(params[val[:-2]], param_name)
+#     else:
+#         return params[param_name]
 
 def get_model_params(params):
     """Convert a ParameterSet to the internal parameter type used by models.
@@ -178,3 +181,91 @@ def get_model_params(params):
 
     return model_params
 
+###########################
+# Data processing functions
+###########################
+
+def compute_spike_activity(spike_history, activity_dt=None):
+    """
+    Parameters
+    ----------
+    spike_history: Spiketrain instance
+        If given, use this spike_history rather than the one already loaded
+        or the one found under `filename`.
+    activity_dt: float
+        Time step of the activity trace. Default is to use that of the spike history;
+        must be an integer multiple of the latter.
+    """
+
+    # Temporarily unload Theano since it isn't supported by spike history
+    use_theano = shim.config.use_theano
+    shim.load(load_theano=False)
+
+    # Compute the activity with time bins same as the spikes
+    spikeAhist = anlz.mean(spike_history, spike_history.pop_slices) / spike_history.dt
+    spikeAhist.name = "A (spikes)"
+    spikeAhist.lock()
+
+    # Subsample the activity to match the desired bin length
+    if activity_dt is None:
+        activity_dt = spikeAhist.dt
+    Ahist = subsample(spikeAhist, activity_dt)
+
+    # Reload Theano if it was loaded when we entered the function
+    shim.load(load_theano=use_theano)
+
+    return Ahist
+
+def subsample(hist, target_dt, max_len = None):
+    """
+    max_len: float
+        (Optional) Maximum length of data to keep. If the spikes data
+        is longer, the resulting activity and input arrays are truncated.
+        If specified as an integer, considered as a number of bins rather
+        than time units.
+    """
+    newhist = anlz.subsample(hist, np.rint(target_dt / hist.dt).astype('int'))
+    if max_len is not None:
+        idx = newhist.get_t_idx(max_len)
+        if idx < len(newhist._tarr) - 1:
+            newhist._unpadded_length = idx - newhist.t0idx + 1
+            newhist._original_data = shim.shared(np.array(newhist._original_data[:idx+1]))
+            newhist._data = hist._original_data
+            newhist._tarr = np.array(hist._tarr[:idx+1])
+            newhist.tn = hist._tarr[-1]
+
+    newhist.lock()
+
+    # Remove dependencies of the subsampled data on the original
+    # (this is to workaround some of sinn's intricacies)
+    sinn.inputs[newhist].clear()
+
+    return newhist
+
+# Windowed crosscorrelation function
+from numpy.lib.stride_tricks import as_strided
+def _check_arg(x, xname):
+    x = np.asarray(x)
+    if x.ndim != 1:
+        raise ValueError('%s must be one-dimensional.' % xname)
+    return x
+def crosscorrelation(x, y, maxlag):
+    """
+    Cross correlation with a maximum number of lags.
+
+    `x` and `y` must be one-dimensional numpy arrays with the same length.
+
+    This computes the same result as
+        numpy.correlate(x, y, mode='full')[len(a)-maxlag-1:len(a)+maxlag]
+
+    The return vaue has length 2*maxlag + 1.
+
+    https://stackoverflow.com/a/34558964
+    """
+    x = _check_arg(x, 'x')
+    y = _check_arg(y, 'y')
+    py = np.pad(y.conj(), 2*maxlag, mode='constant')
+    T = as_strided(py[2*maxlag:], shape=(2*maxlag+1, len(y) + 2*maxlag),
+                   strides=(-py.strides[0], py.strides[0]))
+    px = np.pad(x, maxlag, mode='constant')
+    return T.dot(px)

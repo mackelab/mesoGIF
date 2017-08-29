@@ -1,7 +1,6 @@
 import sys
 import inspect
 
-import parameters
 import simpleeval
 
 import theano_shim as shim

@@ -1,8 +1,6 @@
 import sys
 import numpy as np
 
-import parameters
-
 import theano_shim as shim
 from sinn.histories import Series, Spiketrain
 import sinn.iotools as iotools
@@ -27,7 +25,7 @@ def generate_spikes(params):
     use_theano = shim.config.use_theano
     shim.load(load_theano=False)
 
-    seed = core.resolve_linked_param(params, "seed")
+    seed = params.seed
     rndstream = core.get_random_stream(seed)
 
     logger.info("Generating new spike data...")
@@ -49,12 +47,9 @@ def generate_spikes(params):
         # w includes both w and Γ from Eq. 20
     shist.set_connectivity(w)
 
-
     # Generate the spikes
     shist.set()
 
-    # Save to file
-    iotools.saveraw(core.get_pathname(core.spikes_subdir, params), shist)
     logger.info("Done.")
 
     # Reload Theano if it was loaded when we entered the function
@@ -63,6 +58,8 @@ def generate_spikes(params):
 
 if __name__ == "__main__":
     params = core.load_parameters(sys.argv[1])
-    generate_spikes(params)
+    spiking_model = generate_spikes(params)
+    # Save to file
+    iotools.saveraw(core.get_pathname(core.spikes_subdir, params), spiking_model)
 
 

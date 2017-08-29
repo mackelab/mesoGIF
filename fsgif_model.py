@@ -1196,9 +1196,10 @@ class GIF_mean_field(models.Model):
             m = np.zeros(self.m.shape),
             v = np.zeros(self.v.shape),
             x = self.params.N,
-            y = self.zeros(self.y.shape),
-            z = np.zeros(self.v.shape)          # Clamped to zero
+            y = np.zeros(self.y.shape),
+            z = np.zeros(self.z.shape)          # Clamped to zero
             )
+        return state
 
     def get_stationary_state(self, Astar):
 
