@@ -7,6 +7,7 @@ setup(
                 'fsgif_model'],
     install_requires=[
         'Click',
+        'simpleeval',
         #'theano_shim >= 0.2',
         #'sinn >= 0.1'
     ],

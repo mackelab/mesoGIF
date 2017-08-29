@@ -112,7 +112,7 @@ class GIF_spiking(models.Model):
 
 
     def __init__(self, params, spike_history, input_history,
-                 random_stream=None, memory_time=None):
+                 initializer='stationary', random_stream=None, memory_time=None):
 
         self._refhist = spike_history
         self.s = spike_history
@@ -194,7 +194,7 @@ class GIF_spiking(models.Model):
             u_r = self.expand_param(self.params.u_r, self.params.N)
         )
 
-        self.init_state_vars('stationary')
+        self.init_state_vars(initializer)
 
         # # Initialize last spike time such that it was effectively "at infinity"
         # idx = self.t_hat.t0idx - 1; assert(idx >= 0)
@@ -437,6 +437,7 @@ class GIF_spiking(models.Model):
 
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
+        import pdb; pdb.set_trace()
         return ( self.s.pop_rmul( self.params.τ_m,
                                   self.s.convolve(self.ε, t) ) )
             # s includes the connection weights w, and convolution also includes
@@ -567,7 +568,7 @@ class GIF_mean_field(models.Model):
     #statevars = [ 'λfree', 'λ', 'g', 'h', 'u', 'v', 'm', 'x', 'y', 'z' ]
 
     def __init__(self, params, activity_history, input_history,
-                 random_stream=None, memory_time=None):
+                 initializer='stationary', random_stream=None, memory_time=None):
 
         self._refhist = activity_history
         self.A = activity_history
@@ -663,7 +664,7 @@ class GIF_mean_field(models.Model):
 
 
         # Initialize the variables
-        self.init_state_vars('stationary')
+        self.init_state_vars(initializer)
         # self.θtilde                                                     # QR kernel, computed from θ
         # self.θhat                                                       # convolution of θtilde with n up to t_n (for t_n > t - self.K)
 

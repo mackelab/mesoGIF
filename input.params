@@ -8,7 +8,7 @@
   "inputs": ['ξ'],
   "ξ": {
     "function": 'GaussianWhiteNoise',
-    "std": 1.0,
+    "std": 0.06,
     "shape": (2,),
     }
 }

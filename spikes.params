@@ -2,6 +2,7 @@
   "model": url("model2pop.params"),
   "input": url("input.params"),
   "seed": "input->",
+  "initializer": "stationary",
   # Can add t0, tn or dt parameters to change from input defaults
   "tn": 2,
 }
