@@ -19,6 +19,7 @@
     "model": {
         "type": "GIF_mean_field",
         "params": url("model2pop.params"),
+        "initializer": 'stationary',
         "dt": 0.001,
       },
 

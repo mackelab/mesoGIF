@@ -121,15 +121,15 @@ def load_parameters(parser):
     so that nested lists and tuples become Nd arrays.
     """
     parser.add_argument('parameters', type=str, help="Parameter file.")
-    parser.add_argument('--theano', action='store_true',
-                        help="If specified, indicate tu use Theano. Otherwise, "
-                             "the Numpy implementation is used.")
+    # parser.add_argument('--theano', action='store_true',
+    #                     help="If specified, indicate tu use Theano. Otherwise, "
+    #                          "the Numpy implementation is used.")
     #params = core.load_parameters(sys.argv[1])
     args = parser.parse_args()
-    if args.theano:
-        shim.load_theano()
 
     params = parameters.ParameterSet(args.parameters)
+    if params.theano:
+        shim.load_theano()
 
     # Add flags so that 'params' uniquely identifies this data
     # parameter_flags = ['theano']
@@ -145,7 +145,11 @@ def _params_to_arrays(params):
     for name, val in params.items():
         if isinstance(val, parameters.ParameterSet):
             params[name] = _params_to_arrays(val)
-        elif not isinstance(val, str) and isinstance(val, Iterable):
+        elif (not isinstance(val, str)
+              and isinstance(val, Iterable)
+              and all(type(v) == type(val[0]) for v in val)):
+                # The last condition leaves objects like ('lin', 0, 1) as-is;
+                # otherwise they would be casted to a single type
             params[name] = np.array(val)
     return params
 

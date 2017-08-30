@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+from collections import Iterable
 
 import theano_shim as shim
 import sinn.histories as histories
@@ -25,7 +26,7 @@ Expected parameter format:
 }
 """
 
-def sweep_likelihood(model, calc_params, output_filename):
+def sweep_loglikelihood(model, calc_params, output_filename):
 
     logger.info("Computing log likelihood...")
     param_sweep = sweep.ParameterSweep(model)
@@ -89,12 +90,17 @@ def sweep_likelihood(model, calc_params, output_filename):
 
     return loglikelihood
 
+def get_param_stops(param, fineness):
+    if param.range_desc[0][:3] == 'lin':
+        return sweep.linspace(param.range_desc[1], param.range_desc[2], fineness)
+    elif param.range_desc[0] == 'log':
+        return sweep.logspace(param.range_desc[1], param.range_desc[2], fineness)
 
 if __name__ == "__main__":
     parser = core.argparse.ArgumentParser(description="Generate activity")
     params, flags = core.load_parameters(parser)
 
-    output_filename = core.get_pathname(core.activity_subdir, params)
+    output_filename = core.get_pathname(core.likelihood_subdir, params)
 
     data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
     data = getattr(histories, params.data.type).from_raw(iotools.loadraw(data_filename))
@@ -105,7 +111,8 @@ if __name__ == "__main__":
         iotools.loadraw(input_filename))
     input_history.lock()
 
-    model = getattr(gif, params.model.type)(params.model.params,
+    model_params = core.get_model_params(params.model.params)
+    model = getattr(gif, params.model.type)(model_params,
                                             data,
                                             input_history,
                                             initializer=params.model.initializer)
