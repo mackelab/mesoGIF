@@ -43,7 +43,7 @@ def generate_activity(params):
 
 if __name__ == "__main__":
     parser = core.argparse.ArgumentParser(description="Generate activity")
-    params = core.load_parameters(parser)
+    params, _ = core.load_parameters(parser)
     mfmodel = generate_activity(params)
     # Save to file
     iotools.saveraw(core.get_pathname(core.activity_subdir, params), mfmodel.A)

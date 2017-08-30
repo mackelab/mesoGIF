@@ -59,7 +59,7 @@ def generate_spikes(params):
 
 if __name__ == "__main__":
     parser = core.argparse.ArgumentParser(description="Generate spikes")
-    params = core.load_parameters(parser)
+    params, _ = core.load_parameters(parser)
     spike_filename = core.get_pathname(core.spikes_subdir, params)
     try:
         # Try to load data to see if it's already been calculated

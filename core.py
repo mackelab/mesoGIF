@@ -87,20 +87,25 @@ likelihood_subdir = "likelihood"
 
 def get_filename(params, suffix=None):
     # We need a sorted dictionary of parameters, so that the hash is consistent
-    flat_params = _params_to_arrays(params).flatten()
-        # flatten avoids need to sort recursively
-        # _params_to_arrays normalizes the data
-    sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
-    basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+    if params == '' or params is None:
+        basename = ""
+    else:
+        flat_params = _params_to_arrays(params).flatten()
+            # flatten avoids need to sort recursively
+            # _params_to_arrays normalizes the data
+        sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
+        basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+        basename += '_'
     if suffix is None:
-        return basename
+        assert(len(basename) > 1 and basename[-1] == '_')
+        return basename[:-1] # Remove underscore
     elif isinstance(suffix, str):
-        return basename + '_' + suffix
+        return basename + suffix
     elif isinstance(suffix, Iterable):
         assert(len(suffix) > 0)
-        return basename + '_' + '_'.join([str(s) for s in suffix])
+        return basename + '_'.join([str(s) for s in suffix])
     else:
-        return basename + '_' + str(suffix)
+        return basename + str(suffix)
 
 def get_pathname(subdir, params, suffix=None):
     return os.path.normpath(data_dir + '/' + subdir) + '/' + get_filename(params, suffix)
@@ -126,10 +131,15 @@ def load_parameters(parser):
 
     params = parameters.ParameterSet(args.parameters)
 
-    # Add all flags so that 'params' uniquely identifies this data
-    params.theano = args.theano
+    # Add flags so that 'params' uniquely identifies this data
+    parameter_flags = ['theano']
+    for flag in parameter_flags:
+        setattr(params, flag, getattr(args, flag))
 
-    return _params_to_arrays(params)
+    # Other flags that don't affect the data (e.g. Sumatra label)
+    flags = {}
+
+    return _params_to_arrays(params), flags
 
 def _params_to_arrays(params):
     for name, val in params.items():

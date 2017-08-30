@@ -48,10 +48,13 @@ def generate_input(params):
     input_hist = simpleeval.simple_eval(params.eval, names=hists)
     input_hist.compute_up_to('end')
 
-    pathname = core.get_pathname(core.input_subdir, params)
-    sinn.iotools.saveraw(pathname, input_hist)
+    return input_hist
 
 
 if __name__ == "__main__":
-    params = core.load_parameters(sys.argv[1])
-    generate_input(params)
+    pathname = core.get_pathname(core.input_subdir, params)
+
+    params, _ = core.load_parameters(sys.argv[1])
+    input_hist = generate_input(params)
+
+    sinn.iotools.saveraw(pathname, input_hist)
