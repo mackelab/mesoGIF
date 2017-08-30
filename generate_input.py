@@ -1,4 +1,4 @@
-import sys
+import os.path
 import inspect
 
 import simpleeval
@@ -21,7 +21,7 @@ hist_types = { histname: histtype
 
 def generate_input(params):
 
-    seed = core.resolve_linked_param(params, 'seed')
+    seed = params.seed
     rndstream = core.get_random_stream(seed)
 
     hists = {}
@@ -52,9 +52,13 @@ def generate_input(params):
 
 
 if __name__ == "__main__":
+    parser = core.argparse.ArgumentParser(description="Generate input")
+    params, _ = core.load_parameters(parser)
     pathname = core.get_pathname(core.input_subdir, params)
 
-    params, _ = core.load_parameters(sys.argv[1])
-    input_hist = generate_input(params)
-
-    sinn.iotools.saveraw(pathname, input_hist)
+    if os.path.exists(pathname):
+        logger.info("This input has already been computed. Skipping generation. "
+                    "(file: {})".format(pathname))
+    else:
+        input_hist = generate_input(params)
+        sinn.iotools.saveraw(pathname, input_hist)
