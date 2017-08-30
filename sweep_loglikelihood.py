@@ -67,6 +67,7 @@ def sweep_loglikelihood(model, calc_params, output_filename):
         def logL_fn(model):
             model.clear_unlocked_histories()
             logger.info("Computing state variable traces...")
+            model.init_state_vars(params.model.initializer)
             model.advance(burnin_idx)
             logger.info("Computing log likelihood...")
             return logL_step(burnin_idx)

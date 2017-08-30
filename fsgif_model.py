@@ -662,7 +662,6 @@ class GIF_mean_field(models.Model):
         #      Order must be consistent with return value of symbolic_update
         self.statehists = [ getattr(self, varname) for varname in self.State._fields ]
 
-
         # Initialize the variables
         self.init_state_vars(initializer)
         # self.θtilde                                                     # QR kernel, computed from θ
@@ -1076,7 +1075,11 @@ class GIF_mean_field(models.Model):
             Discretized kernels θ and θtilde.
         """
 
-        params = model.params
+        params = type(model.params)(
+            **{ name: getattr(model.params, name).get_value()
+                for name in model.params._fields } )
+            # Create a new parameter object, of same type as the model parameters,
+            # but with values rather than Theano variables
         dt = model.dt
         # TODO: Find something less ugly than the following. Maybe using np.vectorize ?
         class F:
