@@ -1,6 +1,7 @@
 import sys
-import numpy as np
+import time
 from collections import Iterable
+import numpy as np
 
 import theano_shim as shim
 import sinn.histories as histories
@@ -48,7 +49,7 @@ def sweep_loglikelihood(model, calc_params, output_filename):
     param_sweep.add_param(param1.name, idx=param1.idx, axis_stops=param1_stops)
     param_sweep.add_param(param2.name, idx=param2.idx, axis_stops=param2_stops)
 
-    if type(burnin_idx) != type(datalen):
+    if type(calc_params.burnin) != type(calc_params.datalen):
         raise ValueError("The 'burnin' and 'datalen' parameters must be of the same type.")
     burnin_idx = model.get_t_idx(calc_params.burnin, allow_rounding=True)
     stop_idx = model.get_t_idx(calc_params.burnin+calc_params.datalen, allow_rounding=True)
@@ -79,7 +80,7 @@ def sweep_loglikelihood(model, calc_params, output_filename):
 
     # Compute the likelihood
     t1 = time.perf_counter()
-    loglikelihood = param_sweep.do_sweep(output_filename, ippclient)
+    loglikelihood = param_sweep.do_sweep(output_filename)
             # This can take a long time
             # The result will be saved in output_filename
     t2 = time.perf_counter()
