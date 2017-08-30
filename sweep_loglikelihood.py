@@ -4,6 +4,7 @@ from collections import Iterable
 import numpy as np
 
 import theano_shim as shim
+import sinn
 import sinn.histories as histories
 from sinn.histories import Series, Spiketrain
 from sinn.analyze import sweep
