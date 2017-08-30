@@ -94,6 +94,8 @@ def get_filename(params, suffix=None):
     basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
     if suffix is None:
         return basename
+    elif isinstance(suffix, str):
+        return basename + '_' + suffix
     elif isinstance(suffix, Iterable):
         assert(len(suffix) > 0)
         return basename + '_' + '_'.join([str(s) for s in suffix])

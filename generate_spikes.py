@@ -1,4 +1,4 @@
-import sys
+import os.path
 import numpy as np
 
 import theano_shim as shim
@@ -65,16 +65,16 @@ if __name__ == "__main__":
         # Try to load data to see if it's already been calculated
         spikes_raw = iotools.loadraw(spike_filename)
     except IOError:
-        spiking_model = generate_spikes(params)
+        shist = generate_spikes(params).s
         # Save to file
-        iotools.saveraw(spike_filename, spiking_model.s)
+        iotools.saveraw(spike_filename, shist.s)
     else:
         logger.info("Precomputed data found. Skipping spike generation.")
-        spiking_model = Spiketrain.from_raw(spikes_raw)
+        shist = Spiketrain.from_raw(spikes_raw)
 
     spike_activity_filename = core.get_pathname(core.spikes_subdir, params, 'activity')
     if not os.path.exists(spike_activity_filename):
         logger.info("Computing activity from spike data")
-        Ahist = core.compute_spike_activity(spiking_model.s)
+        Ahist = core.compute_spike_activity(shist)
         iotools.saveraw(spike_activity_filename, Ahist)
 
