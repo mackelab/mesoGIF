@@ -39,9 +39,9 @@ import fsgif_model as gif
 #import os
 #os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
 
-logger = logging.getLogger()
+logger = logging.getLogger('fsgif')
 logger.setLevel(logging.DEBUG)
-def _init_logging_handlers():
+def init_logging_handlers():
     # Only attach handlers if running as a script
     import logging.handlers
     fh = logging.handlers.RotatingFileHandler('fsgif_main.log', mode='w', maxBytes=5e5, backupCount=5)

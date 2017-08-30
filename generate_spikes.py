@@ -58,6 +58,7 @@ def generate_spikes(params):
     return spiking_model
 
 if __name__ == "__main__":
+    core.init_logging_handlers()
     parser = core.argparse.ArgumentParser(description="Generate spikes")
     params, _ = core.load_parameters(parser)
     spike_filename = core.get_pathname(core.spikes_subdir, params)

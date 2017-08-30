@@ -53,6 +53,7 @@ def generate_input(params):
 
 
 if __name__ == "__main__":
+    core.init_logging_handlers()
     parser = core.argparse.ArgumentParser(description="Generate input")
     params, _ = core.load_parameters(parser)
     pathname = core.get_pathname(core.input_subdir, params)

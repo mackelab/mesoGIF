@@ -1,4 +1,4 @@
-import sys
+import os.path
 import numpy as np
 
 import theano_shim as shim
@@ -42,13 +42,14 @@ def generate_activity(params):
     return mfmodel
 
 if __name__ == "__main__":
+    core.init_logging_handlers()
     parser = core.argparse.ArgumentParser(description="Generate activity")
     params, _ = core.load_parameters(parser)
     activity_filename = core.get_pathname(core.activity_subdir, params)
 
     if os.path.exists(activity_filename + '.sir'):
         logger.info("This activity has already been computed. Skipping generation. "
-                    "(file: {})".format(pathname))
+                    "(file: {})".format(activity_filename))
     else:
         mfmodel = generate_activity(params)
         # Save to file

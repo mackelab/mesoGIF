@@ -99,6 +99,7 @@ def get_param_stops(param, fineness):
         return sweep.logspace(param.range_desc[1], param.range_desc[2], fineness)
 
 if __name__ == "__main__":
+    core.init_logging_handlers()
     parser = core.argparse.ArgumentParser(description="Generate activity")
     params, flags = core.load_parameters(parser)
 
