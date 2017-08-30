@@ -882,8 +882,12 @@ class GIF_mean_field(models.Model):
         """
         # FIXME: Initialize series' to 0
 
-        self.θ_dis, self.θtilde_dis = self.discretize_θkernel(
-            [self.θ1, self.θ2], self.A, self.params)
+        if not hasattr(self, 'θ_dis'):
+            assert(not hasattr(self, 'θtilde_dis'))
+            self.θ_dis, self.θtilde_dis = self.discretize_θkernel(
+                [self.θ1, self.θ2], self.A, self.params)
+        else:
+            assert(hasattr(self, 'θtilde_dis'))
 
         # Pad the the series involved in adaptation
         max_mem = self.u.shape[0]
@@ -1003,7 +1007,8 @@ class GIF_mean_field(models.Model):
 
         θ_dis = Series(reference_hist, 'θ_dis',
                        t0 = dt,
-                       tn = memory_time+reference_hist.dt)
+                       tn = memory_time+reference_hist.dt,
+                       iterative = False)
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(
             lambda t: sum( kernel.eval(t) for kernel in θ ) )
@@ -1075,22 +1080,37 @@ class GIF_mean_field(models.Model):
             Discretized kernels θ and θtilde.
         """
 
+        # To determine stationary activity we need actual Numpy values, not Theano variables
         params = type(model.params)(
             **{ name: getattr(model.params, name).get_value()
                 for name in model.params._fields } )
             # Create a new parameter object, of same type as the model parameters,
             # but with values rather than Theano variables
+        if shim.is_theano_variable(θ._data):
+            θarr = θ._data.eval()
+        else:
+            θarr = θ._data
+        if shim.is_theano_variable(θtilde._data):
+            θtildearr = θtilde._data.eval()
+        else:
+            θtildearr = θtilde._data
+
         dt = model.dt
         # TODO: Find something less ugly than the following. Maybe using np.vectorize ?
         class F:
             def __init__(self, model):
                 self.model = model
+                self.f = self.model.f
+                if shim.is_theano_variable(self.f(0)):
+                    # Compile a theano function for f
+                    u_var = shim.getT().dscalar('u')
+                    self.f = shim.gettheano().function([u_var], self.model.f(u_var))
             def __getitem__(self, α):
                 def _f(u):
                     if isinstance(u, Iterable):
-                        return np.array([self.model.f(ui)[α] for ui in u])
+                        return np.array([self.f(ui)[α] for ui in u])
                     else:
-                        return self.model.f(u)[α]
+                        return self.f(u)[α]
                 return _f
         f = F(model)
 
@@ -1100,13 +1120,13 @@ class GIF_mean_field(models.Model):
         memory_time = K * dt
         def rhs(A):
             a = lambda α: ( np.exp(-(jarrs[α]-k_refs[α]+1)*dt/params.τ_m[α]) * (params.u_r[α] - params.u_rest[α])
-                + params.u_rest[α] - params.u_th[α] - θ.get_trace()[k_refs[α]-1:K-1,α] )
+                + params.u_rest[α] - params.u_th[α] - θarr[k_refs[α]-1:K-1,α] )
 
             b = lambda α: ( (1 - np.exp(-(jarrs[α]-k_refs[α]+1)*dt/params.τ_m[α]))[:,np.newaxis]
                 * params.τ_m[α] * params.p[α] * params.N * params.w[α] )
 
             # TODO: remove params.N factor once it's removed in model
-            θtilde_dis = lambda α: θtilde.get_trace()[k_refs[α]-1:K-1,α] * params.N[α] # starts at j+1, ends at K incl.
+            θtilde_dis = lambda α: θtildearr[k_refs[α]-1:K-1,α] * params.N[α] # starts at j+1, ends at K incl.
             c = lambda α: params.J_θ[0,α] * np.exp(-memory_time/params.τ_θ[0,α]) + dt * np.cumsum(θtilde_dis(α)[::-1])[::-1]
 
             ap = lambda α: params.u_rest[α] - params.u_th[α]
@@ -1125,6 +1145,7 @@ class GIF_mean_field(models.Model):
 
         # Solve the equation for A*
         Aguess = np.ones(len(params.N)) * 10
+        rhs(Aguess)
         res = root(rhs, Aguess)
 
         if not res.success:
@@ -1154,6 +1175,21 @@ class GIF_mean_field(models.Model):
         params = model.params
         dt = model.dt
 
+        # To determine stationary activity we need actual Numpy values, not Theano variables
+        params = type(model.params)(
+            **{ name: getattr(model.params, name).get_value()
+                for name in model.params._fields } )
+            # Create a new parameter object, of same type as the model parameters,
+            # but with values rather than Theano variables
+        if shim.is_theano_variable(θ._data):
+            θarr = θ._data.eval()
+        else:
+            θarr = θ._data
+        if shim.is_theano_variable(θtilde._data):
+            θtildearr = θtilde._data.eval()
+        else:
+            θtildearr = θtilde._data
+
         # There are a number of factors K-1 below because the memory vector
         # doesn't include the first (current) bin
         Npop = len(params.N)
@@ -1175,10 +1211,10 @@ class GIF_mean_field(models.Model):
         for α in range(Npop):
             η4[k_refs[α]-1:, α] = (1 - np.exp(- (jarrs[α] - k_refs[α] + 1)*dt / τm[α])) / (1 - np.exp(- dt / τm[α]))
         η.append(η4)
-        η.append( params.u_th + θ.get_trace()[:K] )   # η5
+        η.append( params.u_th + θarr[:K] )   # η5
         # TODO: remove params.N factor once it's removed in model
         η.append( params.J_θ * np.exp(-memory_time/params.τ_θ.flatten())
-                  + dt * params.N*np.cumsum(θtilde.get_trace()[K-1::-1], axis=0)[::-1] )   # η6
+                  + dt * params.N*np.cumsum(θtildearr[K-1::-1], axis=0)[::-1] )   # η6
         η.append( params.J_θ * np.exp(-memory_time/params.τ_θ.flatten()) )  # η7
         η.append( params.u_rest - params.u_th )  # η8
         η.append( η[2] - η[4] )  # η9
@@ -1207,21 +1243,23 @@ class GIF_mean_field(models.Model):
 
     def get_stationary_state(self, Astar):
 
+        # HACK: force f to return plain Numpy object
+        f = self.f
+        if shim.is_theano_variable(f(0)):
+            # Compile a theano function for f
+            u_var = shim.getT().dvector('u')
+            f = shim.gettheano().function([u_var], self.f(u_var))
+
         η = self.get_η_csts(self, self.K,
                             self.θ_dis, self.θtilde_dis)
         state = self.State(
-            h = self.params.u_rest + η[0].dot(Astar),
-            #h_tot = η[1].dot(Astar),
+            h = self.params.u_rest.get_value() + η[0].dot(Astar),
             u = η[2] + η[9].dot(Astar),
-            #varθ = η[4] + η[5]*Astar,
-            #varθfree = self.params.u_th + η[6]*Astar,
             λ = np.stack(
-                  [ self.f(u) for u in η[8] + (η[9]*Astar).sum(axis=-1) - η[5]*Astar ] ),
-            λfree = self.f(η[7] + η[0].dot(Astar) - η[6]*Astar),
-            # The following quantities are set below
-            #P = 0,
-            #Pfree = 0,
+                  [ f(u) for u in η[8] + (η[9]*Astar).sum(axis=-1) - η[5]*Astar ] ),
+            λfree = f(η[7] + η[0].dot(Astar) - η[6].flatten()*Astar),
             g = Astar,
+            # The following quantities are set below
             m = 0,
             v = 0,
             x = 0,
@@ -1237,7 +1275,7 @@ class GIF_mean_field(models.Model):
 
         m = np.empty((self.K, self.Npops))
         v = np.empty((self.K, self.Npops))
-        m[0] = Astar * self.params.N * self.dt
+        m[0] = Astar * self.params.N.get_value() * self.dt
         v[0, ...] = 0
         for i in range(1, self.K):
             m[i] = (1 - P[i])*m[i-1]
@@ -1779,14 +1817,14 @@ class GIF_mean_field(models.Model):
         # xt
         xt = ( (1 - Pfreet) * x0 + mt[-1] )
 
-        # zt
-        zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + vt[0] )
-
         # vt
         vt = shim.concatenate(
             ( shim.zeros( (1,) + self.v.shape[1:] , dtype=sinn.config.floatX),
               (1 - P_λt[1:])**2 * v0[:-1] + P_λt[1:] * m0[:-1] ),
             axis=-2)
+
+        # zt
+        zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + vt[0] )
 
         # W
         Wref_mask = self.ref_mask[:self.m.shape[0],:]
@@ -1807,7 +1845,7 @@ class GIF_mean_field(models.Model):
         # nbar
         nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
 
-        newstate = State(
+        newstate = self.State(
             h = ht,
             u = ut,
             λ = λt,
