@@ -7,6 +7,7 @@ author: Alexandre René
 import logging
 import os.path
 import sys
+import argparse
 import time
 import copy
 import hashlib
@@ -52,12 +53,12 @@ def _init_logging_handlers():
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-def load_theano():
-    """
-    Run this function to use Theano for computations.
-    Currently this is not supported for data generation.
-    """
-    shim.load_theano()
+# def load_theano():
+#     """
+#     Run this function to use Theano for computations.
+#     Currently this is not supported for data generation.
+#     """
+#     shim.load_theano()
 
 rndstream = None
 stream_seed = None
@@ -84,28 +85,48 @@ spikes_subdir = "spikes"
 activity_subdir = "activity"
 likelihood_subdir = "likelihood"
 
-def get_filename(params):
+def get_filename(params, suffix=None):
     # We need a sorted dictionary of parameters, so that the hash is consistent
     flat_params = _params_to_arrays(params).flatten()
         # flatten avoids need to sort recursively
         # _params_to_arrays normalizes the data
     sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
-    return hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+    basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+    if suffix is None:
+        return basename
+    elif isinstance(suffix, Iterable):
+        assert(len(suffix) > 0)
+        return basename + '_' + '_'.join([str(s) for s in suffix])
+    else:
+        return basename + '_' + str(suffix)
 
-def get_pathname(subdir, params):
-    return os.path.normpath(data_dir + '/' + subdir) + '/' + get_filename(params)
+def get_pathname(subdir, params, suffix=None):
+    return os.path.normpath(data_dir + '/' + subdir) + '/' + get_filename(params, suffix)
 
 ##########################
 # Parameters ?
 ##########################
 
-def load_parameters(filename):
+def load_parameters(parser):
     """
     Load a parameter file.
     `np.array` is called on every non-string iterable parameter,
     so that nested lists and tuples become Nd arrays.
     """
-    params = parameters.ParameterSet(filename)
+    parser.add_argument('parameters', type=str, help="Parameter file.")
+    parser.add_argument('--theano', action='store_true',
+                        help="If specified, indicate tu use Theano. Otherwise, "
+                             "the Numpy implementation is used.")
+    #params = core.load_parameters(sys.argv[1])
+    args = parser.parse_args()
+    if args.theano:
+        shim.load_theano()
+
+    params = parameters.ParameterSet(args.parameters)
+
+    # Add all flags so that 'params' uniquely identifies this data
+    params.theano = args.theano
+
     return _params_to_arrays(params)
 
 def _params_to_arrays(params):

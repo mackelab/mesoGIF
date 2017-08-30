@@ -55,11 +55,26 @@ def generate_spikes(params):
     # Reload Theano if it was loaded when we entered the function
     shim.load(load_theano=use_theano)
 
+    return spiking_model
 
 if __name__ == "__main__":
-    params = core.load_parameters(sys.argv[1])
-    spiking_model = generate_spikes(params)
-    # Save to file
-    iotools.saveraw(core.get_pathname(core.spikes_subdir, params), spiking_model)
+    parser = core.argparse.ArgumentParser(description="Generate spikes")
+    params = core.load_parameters(parser)
+    spike_filename = core.get_pathname(core.spikes_subdir, params)
+    try:
+        # Try to load data to see if it's already been calculated
+        spikes_raw = iotools.loadraw(spike_filename)
+    except IOError:
+        spiking_model = generate_spikes(params)
+        # Save to file
+        iotools.saveraw(spike_filename, spiking_model.s)
+    else:
+        logger.info("Precomputed data found. Skipping spike generation.")
+        spiking_model = Spiketrain.from_raw(spikes_raw)
 
+    spike_activity_filename = core.get_pathname(core.spikes_subdir, params, 'activity')
+    if not os.path.exists(spike_activity_filename):
+        logger.info("Computing activity from spike data")
+        Ahist = core.compute_spike_activity(spiking_model.s)
+        iotools.saveraw(spike_activity_filename, Ahist)
 

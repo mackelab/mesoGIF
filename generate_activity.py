@@ -37,12 +37,13 @@ def generate_activity(params):
     mfmodel = gif.GIF_mean_field(model_params, Ahist, Ihist,
                                  params.initializer, rndstream)
     # Generate the activity trace
-    Ahist.set()
+    mfmodel.advance('end')
 
     return mfmodel
 
 if __name__ == "__main__":
-    params = core.load_parameters(sys.argv[1])
+    parser = core.argparse.ArgumentParser(description="Generate activity")
+    params = core.load_parameters(parser)
     mfmodel = generate_activity(params)
     # Save to file
     iotools.saveraw(core.get_pathname(core.activity_subdir, params), mfmodel.A)

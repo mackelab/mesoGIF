@@ -51,7 +51,8 @@ class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
 
     def __init__(self, name, params=None, shape=None, **kwargs):
         kern_params = self.get_kernel_params(params)
-        memory_time = shim.asarray(kern_params.stop - kern_params.start).max()
+        memory_time = shim.asarray(kern_params.stop.get_value()
+                                   - kern_params.start).max()
             # FIXME: At present, if we don't set memory_time now, tn is not set
             #        properly
         super().__init__(name, params, shape,
@@ -1195,7 +1196,7 @@ class GIF_mean_field(models.Model):
             g = np.zeros(self.g.shape),
             m = np.zeros(self.m.shape),
             v = np.zeros(self.v.shape),
-            x = self.params.N,
+            x = self.params.N.get_value(),
             y = np.zeros(self.y.shape),
             z = np.zeros(self.z.shape)          # Clamped to zero
             )
@@ -1250,6 +1251,9 @@ class GIF_mean_field(models.Model):
         return state
 
     def advance(self, stop):
+
+        if stop == 'end':
+            stop = self.nbar.tnidx
 
         stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
 
@@ -1681,7 +1685,7 @@ class GIF_mean_field(models.Model):
         # y0 = statevars[8]
         # z0 = statevars[9]
 
-        curstate = State(statevars)
+        curstate = self.State(*statevars)
 
         λfree0 = curstate.λfree
         λ0 = curstate.λ
