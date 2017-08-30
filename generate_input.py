@@ -7,6 +7,7 @@ import theano_shim as shim
 import sinn.history_functions
 
 import core
+from core import logger
 
 class ParameterError(ValueError):
     pass
@@ -56,7 +57,7 @@ if __name__ == "__main__":
     params, _ = core.load_parameters(parser)
     pathname = core.get_pathname(core.input_subdir, params)
 
-    if os.path.exists(pathname):
+    if os.path.exists(pathname + '.sir'):
         logger.info("This input has already been computed. Skipping generation. "
                     "(file: {})".format(pathname))
     else:

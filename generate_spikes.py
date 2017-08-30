@@ -63,6 +63,7 @@ if __name__ == "__main__":
     spike_filename = core.get_pathname(core.spikes_subdir, params)
     try:
         # Try to load data to see if it's already been calculated
+        import pdb; pdb.set_trace()
         spikes_raw = iotools.loadraw(spike_filename)
     except IOError:
         shist = generate_spikes(params).s
@@ -73,7 +74,7 @@ if __name__ == "__main__":
         shist = Spiketrain.from_raw(spikes_raw)
 
     spike_activity_filename = core.get_pathname(core.spikes_subdir, params, 'activity')
-    if not os.path.exists(spike_activity_filename):
+    if not os.path.exists(spike_activity_filename + '.sir'):
         logger.info("Computing activity from spike data")
         Ahist = core.compute_spike_activity(shist)
         iotools.saveraw(spike_activity_filename, Ahist)

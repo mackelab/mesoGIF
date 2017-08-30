@@ -101,10 +101,11 @@ if __name__ == "__main__":
     data.lock()
 
     input_filename = core.get_pathname(params.input.dir, params.input.params, params.input.name)
-    input_history = getattr(histories, params.input.type).from_raw(io.loadraw(input_filename))
+    input_history = getattr(histories, params.input.type).from_raw(
+        iotools.loadraw(input_filename))
     input_history.lock()
 
-    model = getattr(gif, params.model.name)(params.model.params,
+    model = getattr(gif, params.model.type)(params.model.params,
                                             data,
                                             input_history,
                                             initializer=params.model.initializer)

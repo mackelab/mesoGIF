@@ -44,7 +44,13 @@ def generate_activity(params):
 if __name__ == "__main__":
     parser = core.argparse.ArgumentParser(description="Generate activity")
     params, _ = core.load_parameters(parser)
-    mfmodel = generate_activity(params)
-    # Save to file
-    iotools.saveraw(core.get_pathname(core.activity_subdir, params), mfmodel.A)
+    activity_filename = core.get_pathname(core.activity_subdir, params)
+
+    if os.path.exists(activity_filename + '.sir'):
+        logger.info("This activity has already been computed. Skipping generation. "
+                    "(file: {})".format(pathname))
+    else:
+        mfmodel = generate_activity(params)
+        # Save to file
+        iotools.saveraw(activity_filename, mfmodel.A)
 

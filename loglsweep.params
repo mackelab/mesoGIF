@@ -11,7 +11,7 @@
 
     "input": {
         "type": "Series",
-        "dir": "input",
+        "dir": "inputs",
         "params": url("input.params"),
         "name": "",
     },
@@ -31,5 +31,6 @@
     "fineness": (5, 1),
     "burnin": 0.5,
     "datalen": 0.5,
-    "processes": 1
+    "processes": 1,
+    "theano": False
   }

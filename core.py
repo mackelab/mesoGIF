@@ -96,7 +96,7 @@ def get_filename(params, suffix=None):
         sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
         basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
         basename += '_'
-    if suffix is None:
+    if suffix is None or suffix == "":
         assert(len(basename) > 1 and basename[-1] == '_')
         return basename[:-1] # Remove underscore
     elif isinstance(suffix, str):
@@ -132,9 +132,9 @@ def load_parameters(parser):
     params = parameters.ParameterSet(args.parameters)
 
     # Add flags so that 'params' uniquely identifies this data
-    parameter_flags = ['theano']
-    for flag in parameter_flags:
-        setattr(params, flag, getattr(args, flag))
+    # parameter_flags = ['theano']
+    # for flag in parameter_flags:
+    #     setattr(params, flag, getattr(args, flag))
 
     # Other flags that don't affect the data (e.g. Sumatra label)
     flags = {}
