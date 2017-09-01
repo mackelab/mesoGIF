@@ -128,7 +128,7 @@ def load_parameters(parser):
     args = parser.parse_args()
 
     params = parameters.ParameterSet(args.parameters)
-    if params.theano:
+    if 'theano' in params and params.theano:
         shim.load_theano()
 
     # Add flags so that 'params' uniquely identifies this data
