@@ -2,6 +2,8 @@ import os.path
 import inspect
 
 import simpleeval
+import ast
+import operator as op
 
 import theano_shim as shim
 import sinn.history_functions
@@ -46,7 +48,17 @@ def generate_input(params):
                                    t0=params.t0, tn=params.tn, dt=params.dt,
                                    **hist_params)
 
-    input_hist = simpleeval.simple_eval(params.eval, names=hists)
+    # Replace the "safe" operators with their standard forms
+    # (simpleeval implements safe_add, safe_mult, safe_exp, which test their
+    #  input but this does not work with sinn histories)
+    operators = simpleeval.DEFAULT_OPERATORS
+    operators.update(
+        {ast.Add: op.add,
+         ast.Mult: op.mul,
+         ast.Pow: op.pow}),
+    input_hist = simpleeval.simple_eval(params.eval,
+                                        operators=operators,
+                                        names=hists)
     input_hist.compute_up_to('end')
 
     return input_hist
