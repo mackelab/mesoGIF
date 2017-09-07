@@ -20,16 +20,24 @@ Expected parameters format:
 }
 """
 
-def generate_spikes(params):
+def generate_spikes(mgr):
     # Temporarily unload Theano since it isn't supported by spike history
     use_theano = shim.config.use_theano
     shim.load(load_theano=False)
 
+    params = mgr.params
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
     logger.info("Generating new spike data...")
-    Ihist = Series.from_raw(iotools.loadraw(core.get_pathname(core.input_subdir, params.input)))
+    #Ihist = Series.from_raw(iotools.loadraw(mgr.get_pathname(params.input)))
+    import pdb; pdb.set_trace()
+    Ihist = mgr.load(mgr.get_pathname(params.input,
+                                      subdir='inputs',
+                                      label=''),
+                     calc='input',
+                     cls=Series.from_raw,
+                     recalculate=False)
 
     # Create the spiking model
     # We check if different run parameters were specified,
@@ -59,22 +67,46 @@ def generate_spikes(params):
 
 if __name__ == "__main__":
     core.init_logging_handlers()
-    parser = core.argparse.ArgumentParser(description="Generate spikes")
-    params, _ = core.load_parameters(parser)
-    spike_filename = core.get_pathname(core.spikes_subdir, params)
+    #parser = core.argparse.ArgumentParser(description="Generate spikes")
+    #params, _ = core.load_parameters(parser)
+    mgr = core.RunMgr(description="Generate spikes", calc='spikes',
+                         load_fn=iotools.loadraw)
+    mgr.load_parameters()
+    spike_filename = mgr.get_pathname(label='')
+    spike_activity_filename = mgr.get_pathname(label='', suffix='activity')
+
+    import pdb; pdb.set_trace()
+    generate_data = False
     try:
         # Try to load data to see if it's already been calculated
-        spikes_raw = iotools.loadraw(spike_filename)
-    except IOError:
-        shist = generate_spikes(params).s
+        shist = mgr.load(spike_filename, cls=Spiketrain.from_raw)
+    except core.FileDoesNotExist:
+        generate_data = True
+    except core.FileRenamed:
+        # The --recalculate flag was passed and the original data file renamed
+        # Do the same with the associated activity file
+        generate_data = True
+        activity_path = mgr.find_path(spike_activity_filename)
+        if activity_path is not None:
+            mgr.rename_to_free_file(activity_path)
+                # Warning: If there are missing activity traces, the rename could
+                #   suffix the spikes and activity with a different number, as in
+                #   both cases the first free suffix is used
+                # Warning #2: If the data filename is free, but not the filename
+                #   of the derived data (e.g. because only the first was renamed),
+                #   the derived data is NOT renamed
+    if generate_data:
+        # Get new filenames with the run label
+        spike_filename = mgr.get_pathname()
+        spike_activity_filename = mgr.get_pathname(suffix='activity')
+
+        # Generate spikes
+        shist = generate_spikes(mgr).s
+
         # Save to file
         iotools.saveraw(spike_filename, shist)
-    else:
-        logger.info("Precomputed data found. Skipping spike generation.")
-        shist = Spiketrain.from_raw(spikes_raw)
 
-    spike_activity_filename = core.get_pathname(core.spikes_subdir, params, 'activity')
-    if not os.path.exists(spike_activity_filename + '.sir'):
+        # Compute the associated activity trace
         logger.info("Computing activity from spike data")
         Ahist = core.compute_spike_activity(shist)
         iotools.saveraw(spike_activity_filename, Ahist)

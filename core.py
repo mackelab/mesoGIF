@@ -11,6 +11,7 @@ import argparse
 import time
 import copy
 import hashlib
+import inspect
 import numpy as np
 import scipy as sp
 import collections
@@ -18,7 +19,9 @@ from collections import namedtuple, OrderedDict, Iterable
 
 import theano_shim as shim
 import sinn
+import sinn.iotools as iotools
 import sinn.analyze as anlz
+from sinn.analyze.heatmap import HeatMap
 
 import parameters as parameters
 import fsgif_model as gif
@@ -76,82 +79,257 @@ stream_seed = None
 ###########
 
 ###########################
+# Exceptions
+###########################
+class FileExists(Exception):
+    pass
+class FileDoesNotExist(Exception):
+    pass
+class FileRenamed(Exception):
+    pass
+###########################
+
+###########################
 # Project manager
 ###########################
 
-data_dir = "data"
-input_subdir = "inputs"
-spikes_subdir = "spikes"
-activity_subdir = "activity"
-likelihood_subdir = "likelihood"
-
-def get_filename(params, suffix=None):
-    # We need a sorted dictionary of parameters, so that the hash is consistent
-    if params == '' or params is None:
-        basename = ""
-    else:
-        flat_params = _params_to_arrays(params).flatten()
-            # flatten avoids need to sort recursively
-            # _params_to_arrays normalizes the data
-        sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
-        basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
-        basename += '_'
-    if suffix is None or suffix == "":
-        assert(len(basename) > 1 and basename[-1] == '_')
-        return basename[:-1] # Remove underscore
-    elif isinstance(suffix, str):
-        return basename + suffix
-    elif isinstance(suffix, Iterable):
-        assert(len(suffix) > 0)
-        return basename + '_'.join([str(s) for s in suffix])
-    else:
-        return basename + str(suffix)
-
-def get_pathname(subdir, params, suffix=None):
-    return os.path.normpath(data_dir + '/' + subdir) + '/' + get_filename(params, suffix)
-
-##########################
-# Parameters ?
-##########################
-
-def load_parameters(parser):
+class RunMgr:
     """
-    Load a parameter file.
-    `np.array` is called on every non-string iterable parameter,
-    so that nested lists and tuples become Nd arrays.
+    Run Manager
+    Implements a few convenience functions for scripts designed to be called using Sumatra.
+    The idea is to route all calls to the file system (e.g. to ask for a filename or save data)
+    through this class. This allows it to adjust filenames to follow the Sumatra recommended workflow.
+    Features:
+      - Unique filename creation based on the parameter set.
+      - Caching: calculations with the same parameter set simply return the saved data when it is present.
+      - Adds a 'recalculate' command line option, to override caching mechanism. The old data is then
+        renamed with an appended number.
+      - Automatically takes care of the Sumatra 'label' mechanism, appending the label to the read/write
+        root directory. In the Sumatra configuration, the label option should be set to 'cmdline'.
+
+    TODO
+    =====
+    - Search add different labels directories when looking for a free filename
+    - Idem for existing filename
+    - Update the Sumatra records database when renaming
     """
-    parser.add_argument('parameters', type=str, help="Parameter file.")
-    # parser.add_argument('--theano', action='store_true',
-    #                     help="If specified, indicate tu use Theano. Otherwise, "
-    #                          "the Numpy implementation is used.")
-    #params = core.load_parameters(sys.argv[1])
-    args = parser.parse_args()
 
-    params = parameters.ParameterSet(args.parameters)
-    if 'theano' in params and params.theano:
-        shim.load_theano()
+    data_dir = "data"
+    subdirs = {
+        'input': "inputs",
+        'spikes': "spikes",
+        'activity': "activity",
+        'subdir': "likelihood"
+        }
+    smtlabel = 'cmdline'
+        # Either 'cmdline' or None. 'parameters' not currently supported
 
-    # Add flags so that 'params' uniquely identifies this data
-    # parameter_flags = ['theano']
-    # for flag in parameter_flags:
-    #     setattr(params, flag, getattr(args, flag))
+    def __init__(self, description, calc, load_fn=None):
+        """
+        Parameters
+        ----------
+        description: str,
+            Description text shown at the top of the usage description.
+        calc: str,
+            Type of calculation. If it matches one of the keys in `subdirs`, output
+            is saved in the corresponding subdirectory.
+        load_fn: callable
+            (Optional) Function used to load data given a filename. If not specified,
+            `np.load` is used.
+            If load_fn checks multiple paths (e.g. different extensions/subdirectories),
+            it should provide the `return_path` keyword which, when True, returns the
+            loaded path along with the data as `(data, path)`.
+        """
+        self.parser = argparse.ArgumentParser(description=description)
+        self.parser.add_argument('parameters', type=str, help="Parameter file.")
+        self.parser.add_argument('--recalculate', action='store_true',
+                                 help="If passed, force the recalculation of data. If a result file "
+                                 "matching the given parameters is found, a number is appended to it, "
+                                 "allowing the new data to take the expected filename.")
+        #self.parser.add_argument('--label', type=str,
+        #                         help="Label parameter, automatically provided by Sumatra.",
+        #                         default="")
+        self.calc = calc
+        if calc in self.subdirs:
+            self.subdir = self.subdirs[calc]
+        else:
+            self.subdir = ""
 
-    # Other flags that don't affect the data (e.g. Sumatra label)
-    flags = {}
+        self.params = None
 
-    return _params_to_arrays(params), flags
+        if load_fn is None:
+            self._load_fn = np.load
+        else:
+            self._load_fn = load_fn
 
-def _params_to_arrays(params):
-    for name, val in params.items():
-        if isinstance(val, parameters.ParameterSet):
-            params[name] = _params_to_arrays(val)
-        elif (not isinstance(val, str)
-              and isinstance(val, Iterable)
-              and all(type(v) == type(val[0]) for v in val)):
-                # The last condition leaves objects like ('lin', 0, 1) as-is;
-                # otherwise they would be casted to a single type
-            params[name] = np.array(val)
-    return params
+    def get_filename(self, params=None, suffix=None):
+        # We need a sorted dictionary of parameters, so that the hash is consistent
+        if params is None:
+            params = self.params
+        if params == '':
+            basename = ""
+        else:
+            flat_params = self._params_to_arrays(params).flatten()
+                # flatten avoids need to sort recursively
+                # _params_to_arrays normalizes the data
+            sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
+            basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+            basename += '_'
+        if suffix is None or suffix == "":
+            assert(len(basename) > 1 and basename[-1] == '_')
+            return basename[:-1] # Remove underscore
+        elif isinstance(suffix, str):
+            return basename + suffix
+        elif isinstance(suffix, Iterable):
+            assert(len(suffix) > 0)
+            return basename + '_'.join([str(s) for s in suffix])
+        else:
+            return basename + str(suffix)
+
+    def get_pathname(self, params=None, suffix=None, subdir=None, label=None):
+        if params is None and self.params is None:
+            raise RuntimeError("You must call `load_parameters` before getting a path name.")
+        if subdir is None:
+            subdir = self.subdir
+        if label is None:
+            label = self.label
+        return os.path.join(self.data_dir, label, subdir,
+                            self.get_filename(params, suffix))
+
+    @staticmethod
+    def rename_to_free_file(path):
+        new_f, new_path = iotools._get_free_file(path)
+        new_f.close()
+        os.rename(path, new_path)
+        return new_path
+
+    def find_path(self, path):
+        """
+        Find the path at which a file resides. Uses load_fn internally, and so
+        searches the same paths.
+        """
+        try:
+            _, datapath = self.load_fn(path, return_path=True)
+        except IOError:
+            return None
+        else:
+            return datapath
+
+    def load(self, pathname, cls=None, calc=None, recalculate=None):
+        """
+        Parameters
+        ----------
+        pathname: str
+            Path name as returned by a call to `get_pathname`.
+        calc: str
+            (Optional) Same possible values as __init__'s 'calc' parameter.
+            At present only used for error message.
+            Default is to use the instance's corresponding attribute.
+        cls: class or function
+            (Optional) If specified, will be applied to the loaded data before returning.
+            I.e. the returned value will be `cls(self.load_fn(pathname))`, instead of
+            `self.load_fn(pathname)` if unspecified.
+        recalculate: bool
+            (Optional) Indicate whether to force recalculation.
+            Default is to use the instance's corresponding attribute.
+        """
+        # Set the default values
+        if calc is None:
+            calc = self.calc
+        if recalculate is None:
+            recalculate = self.recalculate
+
+        # Try loading the data
+        try:
+            data, datapath = self.load_fn(pathname, return_path=True)
+        except IOError:
+            # This data does not exist
+            raise FileDoesNotExist("File '{}' does not exist."
+                                   .format(pathname))
+        else:
+            if recalculate:
+                # Data does already exist, but we explicitly asked to recalculate it:
+                # move the current data to a new filename.
+                # The data is not loaded.
+                new_path = self.rename_to_free_file(datapath)
+                logger.info("Recalculating. Previous {} data moved to {}."
+                            .format(calc, new_path))
+                raise FileRenamed("File '{}' was renamed to {}."
+                                  .format(datapath, new_path))
+            else:
+                # Data was found; load it.
+                logger.info("Precomputed {} data found. Skipping calculation."
+                            .format(calc))
+                if cls is None:
+                    return data
+                else:
+                    return cls(data)
+
+    def add_argument(self, *args, **kwargs):
+        """Wrapper for the internal ArgParse parser instance."""
+        self.parser(*args, **kwargs)
+
+    def load_parameters(self):
+        """
+        Load a parameter file.
+        `np.array` is called on every non-string iterable parameter,
+        so that nested lists and tuples become Nd arrays.
+        """
+        # parser.add_argument('--theano', action='store_true',
+        #                     help="If specified, indicate tu use Theano. Otherwise, "
+        #                          "the Numpy implementation is used.")
+        #params = core.load_parameters(sys.argv[1])
+        if self.smtlabel == 'cmdline':
+            # Remove the label Sumatra appended before processing cmdline options
+            self.label = sys.argv.pop()
+        args = self.parser.parse_args()
+
+        self.recalculate = args.recalculate
+
+        self.params = self._params_to_arrays(parameters.ParameterSet(args.parameters))
+        if 'theano' in self.params and self.params.theano:
+            shim.load_theano()
+
+        # Add flags so that 'params' uniquely identifies this data
+        # parameter_flags = ['theano']
+        # for flag in parameter_flags:
+        #     setattr(params, flag, getattr(args, flag))
+
+        # Other flags that don't affect the data (e.g. Sumatra label)
+        #flags = {}
+
+        #return _params_to_arrays(params), flags
+
+    def load_fn(self, pathname, return_path=False):
+        """
+        Custom data loading functions should allow a 'return_path' keyword,
+        if they try to load from multiple paths.
+        This function provides a consistent interface to the load_fn set
+        during initialization: if it accepts return_path, that is used, otherwise
+        the `pathname` is simply returned when `return_path` is True.
+        """
+        sig = inspect.signature(self._load_fn)
+        if 'return_path' in sig.parameters:
+            return self._load_fn(pathname, return_path=return_path)
+        else:
+            data = self._load_fn(pathname)
+            if return_path:
+                return data, pathname
+            else:
+                return data
+
+    @classmethod
+    def _params_to_arrays(cls, params):
+        for name, val in params.items():
+            if isinstance(val, parameters.ParameterSet):
+                params[name] = cls._params_to_arrays(val)
+            elif (not isinstance(val, str)
+                and isinstance(val, Iterable)
+                and all(type(v) == type(val[0]) for v in val)):
+                    # The last condition leaves objects like ('lin', 0, 1) as-is;
+                    # otherwise they would be casted to a single type
+                params[name] = np.array(val)
+        return params
 
 def get_random_stream(seed=314):
     global rndstream, stream_seed
@@ -306,3 +484,25 @@ def crosscorrelation(x, y, maxlag):
                    strides=(-py.strides[0], py.strides[0]))
     px = np.pad(x, maxlag, mode='constant')
     return T.dot(px)
+
+def exploglikelihood(loglikelihood):
+    """
+    Return the likelihood, given the loglikelihood.
+
+    Parameters
+    ----------
+    loglikelihood: HeatMap
+    """
+    assert(isinstance(loglikelihood, HeatMap))
+
+    # Convert to the likelihood. We first make the maximum value 0, to avoid
+    # underflows when computing the exponential
+    likelihood = (loglikelihood - loglikelihood.max()).apply_op("L", np.exp)
+
+    # Plot the likelihood
+    likelihood.cmap = 'viridis'
+    likelihood.set_ceil(likelihood.max())
+    likelihood.set_floor(0)
+    likelihood.set_norm('linear')
+
+    return likelihood
