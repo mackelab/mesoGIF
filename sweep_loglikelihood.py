@@ -101,25 +101,50 @@ def get_param_stops(param, fineness):
 
 if __name__ == "__main__":
     core.init_logging_handlers()
-    parser = core.argparse.ArgumentParser(description="Generate activity")
-    params, flags = core.load_parameters(parser)
+    #parser = core.argparse.ArgumentParser(description="Generate activity")
+    #params, flags = core.load_parameters(parser)
+    mgr = core.RunMgr(description="Sweep loglikelihood", calc='logL_sweep')
+    mgr.load_parameters()
+    params = mgr.params
 
-    output_filename = core.get_pathname(core.likelihood_subdir, params)
+    #output_filename = core.get_pathname(core.likelihood_subdir, params)
+    #data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
+    logL_filename = mgr.get_pathname(label='')
+    data_filename = mgr.get_pathname(params=params.data.params,
+                                     subdir=params.data.dir,
+                                     suffix=params.data.name,
+                                     label='')
+    input_filename = mgr.get_pathname(params=params.input.params,
+                                      subdir=params.input.dir,
+                                      suffix=params.input.name,
+                                      label='')
 
-    data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
-    data = getattr(histories, params.data.type).from_raw(iotools.loadraw(data_filename))
-    data.lock()
+    try:
+        mgr.load(logL_filename)
+    except (core.FileDoesNotExist, core.FileRenamed):
 
-    input_filename = core.get_pathname(params.input.dir, params.input.params, params.input.name)
-    input_history = getattr(histories, params.input.type).from_raw(
-        iotools.loadraw(input_filename))
-    input_history.lock()
+        data = mgr.load(data_filename,
+                        cls=getattr(histories, params.data.type).from_raw,
+                        calc='activity',
+                        recalculate=False)
+        data.lock()
 
-    model_params = core.get_model_params(params.model.params)
-    model = getattr(gif, params.model.type)(model_params,
-                                            data,
-                                            input_history,
-                                            initializer=params.model.initializer)
+        #input_filename = core.get_pathname(params.input.dir, params.input.params, params.input.name)
+        #input_history = getattr(histories, params.input.type).from_raw(
+        #    iotools.loadraw(input_filename))
+        input_history = mgr.load(input_filename,
+                                 cls=getattr(histories, params.input.type).from_raw,
+                                 calc='input',
+                                 recalculate=False)
+        input_history.lock()
 
-    sweep_loglikelihood(model, params, output_filename)
+        model_params = core.get_model_params(params.model.params)
+        model = getattr(gif, params.model.type)(model_params,
+                                                data,
+                                                input_history,
+                                                initializer=params.model.initializer)
+
+        # Get output filename with run label
+        logL_filename = mgr.get_pathname()
+        sweep_loglikelihood(model, params, logL_filename)
 

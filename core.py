@@ -119,12 +119,15 @@ class RunMgr:
         'input': "inputs",
         'spikes': "spikes",
         'activity': "activity",
-        'subdir': "likelihood"
+        'logL_sweep': "likelihood"
         }
     smtlabel = 'cmdline'
         # Either 'cmdline' or None. 'parameters' not currently supported
+    _load_fn = iotools.loadraw
+         # FIXME: Make this work as self._load_fn. Currently that is seen as a
+         #   method, and so it is passed 'self' as first argument.
 
-    def __init__(self, description, calc, load_fn=None):
+    def __init__(self, description, calc):
         """
         Parameters
         ----------
@@ -157,19 +160,23 @@ class RunMgr:
 
         self.params = None
 
-        if load_fn is None:
-            self._load_fn = np.load
-        else:
-            self._load_fn = load_fn
+        # if load_fn is None:
+        #     self._load_fn = np.load
+        # else:
+        #     self._load_fn = load_fn
 
     def get_filename(self, params=None, suffix=None):
-        # We need a sorted dictionary of parameters, so that the hash is consistent
         if params is None:
             params = self.params
+        return self._get_filename(params, suffix)
+
+    @classmethod
+    def _get_filename(cls, params, suffix=None):
         if params == '':
             basename = ""
         else:
-            flat_params = self._params_to_arrays(params).flatten()
+            # We need a sorted dictionary of parameters, so that the hash is consistent
+            flat_params = cls._params_to_arrays(params).flatten()
                 # flatten avoids need to sort recursively
                 # _params_to_arrays normalizes the data
             sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
@@ -203,13 +210,14 @@ class RunMgr:
         os.rename(path, new_path)
         return new_path
 
-    def find_path(self, path):
+    @classmethod
+    def find_path(cls, path):
         """
         Find the path at which a file resides. Uses load_fn internally, and so
         searches the same paths.
         """
         try:
-            _, datapath = self.load_fn(path, return_path=True)
+            _, datapath = cls.load_fn(path, return_path=True)
         except IOError:
             return None
         else:
@@ -300,7 +308,8 @@ class RunMgr:
 
         #return _params_to_arrays(params), flags
 
-    def load_fn(self, pathname, return_path=False):
+    @classmethod
+    def load_fn(cls, pathname, return_path=False):
         """
         Custom data loading functions should allow a 'return_path' keyword,
         if they try to load from multiple paths.
@@ -308,11 +317,11 @@ class RunMgr:
         during initialization: if it accepts return_path, that is used, otherwise
         the `pathname` is simply returned when `return_path` is True.
         """
-        sig = inspect.signature(self._load_fn)
+        sig = inspect.signature(cls._load_fn)
         if 'return_path' in sig.parameters:
-            return self._load_fn(pathname, return_path=return_path)
+            return cls._load_fn(pathname, return_path=return_path)
         else:
-            data = self._load_fn(pathname)
+            data = cls._load_fn(pathname)
             if return_path:
                 return data, pathname
             else:

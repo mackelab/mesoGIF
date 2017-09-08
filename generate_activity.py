@@ -12,15 +12,16 @@ from core import logger
 import fsgif_model as gif
 ############################
 
-def generate_activity(params):
+def generate_activity(mgr):
 
+    params = mgr.params
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
     logger.info("Generating new activity data...")
     Ihist = core.subsample(
         Series.from_raw(iotools.loadraw(
-            core.get_pathname(core.input_subdir, params.input))),
+            mgr.get_pathname(mgr.subdirs['input'], params.input))),
         params.dt)
     # Create the spiking model
     # We check if different run parameters were specified,
@@ -43,15 +44,17 @@ def generate_activity(params):
 
 if __name__ == "__main__":
     core.init_logging_handlers()
-    parser = core.argparse.ArgumentParser(description="Generate activity")
-    params, _ = core.load_parameters(parser)
-    activity_filename = core.get_pathname(core.activity_subdir, params)
+    mgr = core.RunMgr(description="Generate activity", calc='activity')
+    mgr.load_parameters()
+    activity_filename = mgr.get_pathname(label='')
 
-    if os.path.exists(activity_filename + '.sir'):
-        logger.info("This activity has already been computed. Skipping generation. "
-                    "(file: {})".format(activity_filename))
-    else:
-        mfmodel = generate_activity(params)
+    try:
+        mgr.load(activity_filename, cls=Series.frow_raw)
+    except (core.FileDoesNotExist, core.FileRenamed):
+        # Get pathname with run label
+        activity_filename = mgr.get_pathname(label='')
+        # Create mean-field model and generate activity
+        mfmodel = generate_activity(mgr)
         # Save to file
         iotools.saveraw(activity_filename, mfmodel.A)
 

@@ -31,9 +31,8 @@ def generate_spikes(mgr):
 
     logger.info("Generating new spike data...")
     #Ihist = Series.from_raw(iotools.loadraw(mgr.get_pathname(params.input)))
-    import pdb; pdb.set_trace()
     Ihist = mgr.load(mgr.get_pathname(params.input,
-                                      subdir='inputs',
+                                      subdir=mgr.subdirs['input'],
                                       label=''),
                      calc='input',
                      cls=Series.from_raw,
@@ -67,15 +66,11 @@ def generate_spikes(mgr):
 
 if __name__ == "__main__":
     core.init_logging_handlers()
-    #parser = core.argparse.ArgumentParser(description="Generate spikes")
-    #params, _ = core.load_parameters(parser)
-    mgr = core.RunMgr(description="Generate spikes", calc='spikes',
-                         load_fn=iotools.loadraw)
+    mgr = core.RunMgr(description="Generate spikes", calc='spikes')
     mgr.load_parameters()
     spike_filename = mgr.get_pathname(label='')
     spike_activity_filename = mgr.get_pathname(label='', suffix='activity')
 
-    import pdb; pdb.set_trace()
     generate_data = False
     try:
         # Try to load data to see if it's already been calculated

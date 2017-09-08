@@ -22,8 +22,9 @@ hist_types = { histname: histtype
 
 # Can add elements to hist_type here
 
-def generate_input(params):
+def generate_input(mgr):
 
+    params = mgr.params
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
@@ -66,13 +67,16 @@ def generate_input(params):
 
 if __name__ == "__main__":
     core.init_logging_handlers()
-    parser = core.argparse.ArgumentParser(description="Generate input")
-    params, _ = core.load_parameters(parser)
-    pathname = core.get_pathname(core.input_subdir, params)
+    mgr = core.RunMgr(description="Generate input", calc='input')
+    mgr.load_parameters()
+    pathname = mgr.get_pathname(label='')
 
-    if os.path.exists(pathname + '.sir'):
-        logger.info("This input has already been computed. Skipping generation. "
-                    "(file: {})".format(pathname))
-    else:
-        input_hist = generate_input(params)
+    try:
+        mgr.load(pathname)
+    except (core.FileDoesNotExist, core.FileRenamed):
+        # Get pathname with run label
+        pathname = mgr.get_pathname()
+        # Generate input
+        input_hist = generate_input(mgr)
+        # Save to file
         sinn.iotools.saveraw(pathname, input_hist)
