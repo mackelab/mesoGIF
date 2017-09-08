@@ -266,7 +266,7 @@ class RunMgr:
                                   .format(datapath, new_path))
             else:
                 # Data was found; load it.
-                logger.info("Precomputed {} data found. Skipping calculation."
+                logger.info("Precomputed {} data found."
                             .format(calc))
                 if cls is None:
                     return data

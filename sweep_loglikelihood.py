@@ -127,6 +127,7 @@ if __name__ == "__main__":
                         cls=getattr(histories, params.data.type).from_raw,
                         calc='activity',
                         recalculate=False)
+        data = core.subsample(data, mgr.params.model.dt)
         data.lock()
 
         #input_filename = core.get_pathname(params.input.dir, params.input.params, params.input.name)
@@ -136,6 +137,7 @@ if __name__ == "__main__":
                                  cls=getattr(histories, params.input.type).from_raw,
                                  calc='input',
                                  recalculate=False)
+        input_history = core.subsample(input_history, mgr.params.model.dt)
         input_history.lock()
 
         model_params = core.get_model_params(params.model.params)
