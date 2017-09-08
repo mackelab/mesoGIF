@@ -52,7 +52,7 @@ if __name__ == "__main__":
         mgr.load(activity_filename, cls=Series.frow_raw)
     except (core.FileDoesNotExist, core.FileRenamed):
         # Get pathname with run label
-        activity_filename = mgr.get_pathname(label='')
+        activity_filename = mgr.get_pathname(label=None)
         # Create mean-field model and generate activity
         mfmodel = generate_activity(mgr)
         # Save to file

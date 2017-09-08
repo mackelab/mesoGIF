@@ -75,7 +75,7 @@ if __name__ == "__main__":
         mgr.load(pathname)
     except (core.FileDoesNotExist, core.FileRenamed):
         # Get pathname with run label
-        pathname = mgr.get_pathname()
+        pathname = mgr.get_pathname(label=None)
         # Generate input
         input_hist = generate_input(mgr)
         # Save to file

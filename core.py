@@ -99,6 +99,7 @@ class RunMgr:
     Implements a few convenience functions for scripts designed to be called using Sumatra.
     The idea is to route all calls to the file system (e.g. to ask for a filename or save data)
     through this class. This allows it to adjust filenames to follow the Sumatra recommended workflow.
+
     Features:
       - Unique filename creation based on the parameter set.
       - Caching: calculations with the same parameter set simply return the saved data when it is present.
@@ -106,6 +107,10 @@ class RunMgr:
         renamed with an appended number.
       - Automatically takes care of the Sumatra 'label' mechanism, appending the label to the read/write
         root directory. In the Sumatra configuration, the label option should be set to 'cmdline'.
+
+    Usage:
+      Subclass in your own project directory and set the class-level attributes.
+      Then import the subclassed manager in your scripts.
 
     TODO
     =====
@@ -127,7 +132,7 @@ class RunMgr:
          # FIXME: Make this work as self._load_fn. Currently that is seen as a
          #   method, and so it is passed 'self' as first argument.
 
-    def __init__(self, description, calc):
+    def __init__(self, description="", calc=""):
         """
         Parameters
         ----------
@@ -193,7 +198,36 @@ class RunMgr:
         else:
             return basename + str(suffix)
 
-    def get_pathname(self, params=None, suffix=None, subdir=None, label=None):
+    def get_pathname(self, params=None, suffix=None, subdir=None, label=""):
+        """
+        Construct a pathname by hashing a ParameterSet. The resulting path will be
+        [label]/[subdir]/hash([params])_suffix
+        All parameters are optional; the effects of their defaults are given below.
+
+        Parameters
+        ----------
+        params: ParameterSet
+            ParameterSet instance. Its SHA1 hash will form the filename.
+            Default is to take the parameter instance obtained from `load_parameters`.
+
+        suffix: str
+            String appended to the filename. Useful to differentiate different output files
+            obtained from the same parameter set.
+            Default is not to add a suffix.
+
+        subdir: str
+            Subdirectory (below the label) in which to put/get the file.
+            Default is to use the subdirectory defined by the run manager's 'calc' attribute.
+            (see RunMgr.__init__)
+
+        label: str or None
+            Prefix directory. This matches the use of Sumatra for the 'label' being a run-
+            specific root directory in which to put files. This allows it to differentiate
+            the output of different simultaneous runs.
+            Default is not to add a label. If the value is None, the label value provided by
+            Sumatra is used (this requires that `load_parameters` has already been executed).
+        """
+
         if params is None and self.params is None:
             raise RuntimeError("You must call `load_parameters` before getting a path name.")
         if subdir is None:
@@ -239,13 +273,16 @@ class RunMgr:
             `self.load_fn(pathname)` if unspecified.
         recalculate: bool
             (Optional) Indicate whether to force recalculation.
-            Default is to use the instance's corresponding attribute.
+            Default is to use the instance's corresponding attribute (if set), otherwise False.
         """
         # Set the default values
         if calc is None:
             calc = self.calc
         if recalculate is None:
-            recalculate = self.recalculate
+            try:
+                recalculate = self.recalculate
+            except AttributeError:
+                recalculate = False
 
         # Try loading the data
         try:

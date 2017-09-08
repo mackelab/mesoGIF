@@ -92,8 +92,8 @@ if __name__ == "__main__":
                 #   the derived data is NOT renamed
     if generate_data:
         # Get new filenames with the run label
-        spike_filename = mgr.get_pathname()
-        spike_activity_filename = mgr.get_pathname(suffix='activity')
+        spike_filename = mgr.get_pathname(label=None)
+        spike_activity_filename = mgr.get_pathname(suffix='activity', label=None)
 
         # Generate spikes
         shist = generate_spikes(mgr).s

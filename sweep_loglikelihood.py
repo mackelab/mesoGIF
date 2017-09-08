@@ -147,6 +147,6 @@ if __name__ == "__main__":
                                                 initializer=params.model.initializer)
 
         # Get output filename with run label
-        logL_filename = mgr.get_pathname()
+        logL_filename = mgr.get_pathname(label=None)
         sweep_loglikelihood(model, params, logL_filename)
 
