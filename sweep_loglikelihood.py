@@ -17,6 +17,8 @@ from core import logger
 import fsgif_model as gif
 ############################
 
+debug = True
+
 """
 Expected parameter format:
 {
@@ -59,30 +61,39 @@ def sweep_loglikelihood(model, calc_params, output_filename):
         model.theano_reset()
         model.clear_unlocked_histories()
         tidx = shim.getT().lscalar('tidx')
-        logL_graph, statevar_upds, shared_upds = model.loglikelihood(tidx, stop_idx-tidx)
+        logL_graph, statevar_seqs, shared_upds = model.loglikelihood(tidx, stop_idx-tidx)
         logger.info("Compiling Theano loglikelihood")
-        logL_step = shim.gettheano().function([tidx], logL_graph)
-                                              #updates=upds)
+        if not debug:
+            logL_fn = shim.gettheano().function([tidx], logL_graph)
+        else:
+            # Also return the full sequence of state variables
+            logL_fn = shim.gettheano().function(
+                [tidx], [logL_graph] + statevar_seqs )
+                          # [np.array(statevar_seq) for statevar_seq in statevar_seqs] ] )
         logger.info("Done compilation.")
         model.theano_reset()
-        def logL_fn(model):
+        def logL_fn_wrapper(model):
             model.clear_unlocked_histories()
             logger.info("Computing state variable traces...")
             model.init_state_vars(params.model.initializer)
             model.advance(burnin_idx)
             logger.info("Computing log likelihood...")
-            return logL_step(burnin_idx)
-            #return sum(logL_step(i)
-            #           for i in range(burnin_idx, stop_idx, mbatch_size))
+            return logL_fn(burnin_idx)
     else:
-        def logL_fn(model):
-            return model.loglikelihood(burnin_idx, stop_idx-burnin_idx)[0]
+        def logL_fn_wrapper(model):
+            res = model.loglikelihood(burnin_idx, stop_idx-burnin_idx)
+            if not debug:
+                return res[0]
+            else:
+                # Also return the full sequence of state variables
+                return [res[0]] + [ hist[hist.t0idx:stop_idx+hist.t0idx]
+                                    for hist in res[1] ]
 
-    param_sweep.set_function(logL_fn, 'log $L$')
+    param_sweep.set_function(logL_fn_wrapper, 'log $L$')
 
     # Compute the likelihood
     t1 = time.perf_counter()
-    loglikelihood = param_sweep.do_sweep(output_filename)
+    loglikelihood = param_sweep.do_sweep(output_filename, debug=debug)
             # This can take a long time
             # The result will be saved in output_filename
     t2 = time.perf_counter()
@@ -148,5 +159,14 @@ if __name__ == "__main__":
 
         # Get output filename with run label
         logL_filename = mgr.get_pathname(label=None)
-        sweep_loglikelihood(model, params, logL_filename)
+
+        # Compute log likelihood
+        logL = sweep_loglikelihood(model, params, logL_filename)
+
+        if debug:
+            theanostr = '_theano' if params.theano else '_numpy'
+            iotools.save('logL_debug' + theanostr, logL[0])
+
+            for varname, varseq in zip(model.State._fields, logL[1:]):
+                iotools.save('logL_debug_' + varname + theanostr, varseq)
 

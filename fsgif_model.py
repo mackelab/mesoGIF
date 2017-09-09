@@ -1447,7 +1447,7 @@ class GIF_mean_field(models.Model):
                 logL = logLstep(t, logL)[0][0]
             upds = shim.get_updates()
 
-            return logL, upds
+            return logL, self.statehists, upds
 
     def f(self, u):
         """Link function. Maps difference between membrane potential & threshold
