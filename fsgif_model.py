@@ -1384,7 +1384,8 @@ class GIF_mean_field(models.Model):
 
         def logLstep(tidx, *args):
             if shim.is_theano_object(tidx):
-                statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[1:])
+                statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[2:])
+                    # FIXME: make this args[1:] once n is in state variables
                 nbar = output_vars[self.nbar]
             else:
                 nbar = self.nbar[tidx+self.nbar.t0idx]
@@ -1400,7 +1401,8 @@ class GIF_mean_field(models.Model):
                                    + (N-n)*shim.log(1-p)
                                   ).sum()
 
-            return [cum_logL] + list(statevar_updates.values()), {}
+            return [cum_logL] + [n] + list(statevar_updates.values()), {}
+            # FIXME: Remove [n] once it is included in state vars
             # return [cum_logL], shim.get_updates()
 
         if shim.is_theano_object([self.nbar._data, self.params, self.n._data]):
@@ -1409,6 +1411,12 @@ class GIF_mean_field(models.Model):
             # Create the outputs_info list
             # First element is the loglikelihood, subsequent are aligned with input_vars
             outputs_info = [shim.cast(0, sinn.config.floatX)]
+
+            # FIXME: Remove once 'n' is in state variables
+            outputs_info.append( shim.cast_int32(self.n._data[startidx + self.n.t0idx - 1]) )
+            #outputs_info.append( self.n._data[startidx + self.n.t0idx - 1] )
+
+
             for hist in self.statehists:
                 outputs_info.append( hist._data[startidx + hist.t0idx - 1] )
                 # HACK !!
@@ -1442,12 +1450,17 @@ class GIF_mean_field(models.Model):
                 # logL = outputs[0]; outputs[1:] => statevars
         else:
             # TODO: Remove this branch once shim.scan is implemented
-            logL = 0
-            for t in np.arange(startidx, stopidx):
-                logL = logLstep(t, logL)[0][0]
+            logL = np.zeros(stopidx - startidx)
+            logL[0] = logLstep(startidx, 0)[0][0]
+            for t in np.arange(startidx+1, stopidx):
+                logL[t-startidx] = logLstep(t, logL[t-startidx-1])[0][0]
             upds = shim.get_updates()
 
-            return logL, self.statehists, upds
+            return ( logL[-1],
+                     [ self.n[startidx+self.n.t0idx : stopidx+self.n.t0idx] ] +
+                     [ hist[startidx+hist.t0idx : stopidx+hist.t0idx]
+                       for hist in self.statehists],
+                     upds )
 
     def f(self, u):
         """Link function. Maps difference between membrane potential & threshold
@@ -1557,15 +1570,12 @@ class GIF_mean_field(models.Model):
         # FIXME: t-self.K+1:t almost certainly wrong
         tidx_n = self.n.get_t_idx(t)
         K = self.u.shape[0]
-        # DEBUG
-        #if shim.cf.use_theano:
-        #    K = shim.print(K, "K : ")
-        #θtilde = shim.print(self.θtilde_dis._data, "θtilde data")  # DEBUG
         # HACK: use of ._data to avoid indexing θtilde (see comment where it is created)
         # TODO: Exclude the last element from the sum, rather than subtracting it.
         varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
                     - self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:])[...,::-1,:]
+
         # FIXME: Use indexing that is robust to θtilde_dis' t0idx
         # FIXME: Check that this is really what line 15 says
         return self.θ_dis._data[:K] + self.varθfree[t] + varθref
@@ -1775,7 +1785,7 @@ class GIF_mean_field(models.Model):
         # gt
         red_factor = shim.exp(- self.g.dt/self.params.τ_θ)
         gt = ( g0 * red_factor
-                 + (1 - red_factor) * self.n[tidx_n-self.K] / (self.params.N * self.g.dt)
+                 + (1 - red_factor) * self.n._data[tidx_n-self.K] / (self.params.N * self.g.dt)
                 ).flatten()
 
         # varθfree
@@ -1784,9 +1794,9 @@ class GIF_mean_field(models.Model):
 
         # varθ
         K = self.u.shape[0]
-        varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
+        varθref = ( shim.cumsum(self.n._data[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
-                              - self.n[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K])[...,::-1,:]
+                              - self.n._data[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:])[...,::-1,:]
         varθ = self.θ_dis._data[:K] + varθfree + varθref
 
         # λt
@@ -1808,7 +1818,7 @@ class GIF_mean_field(models.Model):
                            1 - shim.exp(-P_λ_tmp))
         # mt
         mt = shim.concatenate(
-            ( self.n[tidx_n-1][np.newaxis,:], ((1 - P_λt[1:]) * m0[:-1]) ),
+            ( self.n._data[tidx_n-1][np.newaxis,:], ((1 - P_λt[1:]) * m0[:-1]) ),
             axis=-2 )
 
         # X

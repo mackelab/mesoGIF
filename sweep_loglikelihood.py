@@ -17,7 +17,7 @@ from core import logger
 import fsgif_model as gif
 ############################
 
-debug = True
+debug = False
 
 """
 Expected parameter format:
@@ -86,8 +86,8 @@ def sweep_loglikelihood(model, calc_params, output_filename):
                 return res[0]
             else:
                 # Also return the full sequence of state variables
-                return [res[0]] + [ hist[hist.t0idx:stop_idx+hist.t0idx]
-                                    for hist in res[1] ]
+                return [res[0]] + res[1]
+                   #[ hist[:stop_idx+hist.t0idx] for hist in res[1] ]
 
     param_sweep.set_function(logL_fn_wrapper, 'log $L$')
 
@@ -163,10 +163,29 @@ if __name__ == "__main__":
         # Compute log likelihood
         logL = sweep_loglikelihood(model, params, logL_filename)
 
+
         if debug:
+            print("Obtained logL: ", logL[0][-1])
+
             theanostr = '_theano' if params.theano else '_numpy'
-            iotools.save('logL_debug' + theanostr, logL[0])
+            iotools.save('logL_debug' + theanostr, logL[0],
+                         overwrite=True)
 
-            for varname, varseq in zip(model.State._fields, logL[1:]):
-                iotools.save('logL_debug_' + varname + theanostr, varseq)
+            varnames = ['n'] + list(model.State._fields)
+            for varname, varseq in zip(varnames, logL[1:]):
+                iotools.save('logL_debug_' + varname + theanostr, varseq,
+                             overwrite=True)
 
+            def save(var, varname):
+                if isinstance(var, np.ndarray):
+                    val = var
+                else:
+                    try:
+                        val = var.get_value()
+                    except AttributeError:
+                        val = var.eval()
+                iotools.save('logL_debug_' + varname + theanostr, val,
+                             overwrite=True)
+
+            save(model.θ_dis._data, 'θdis')
+            save(model.θtilde_dis._data, 'θtilde_dis')
