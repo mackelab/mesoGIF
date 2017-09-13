@@ -23,7 +23,7 @@ import sinn.iotools as iotools
 import sinn.analyze as anlz
 from sinn.analyze.heatmap import HeatMap
 
-import parameters as parameters
+from parameters import ParameterSet
 import fsgif_model as gif
 
 # try:
@@ -120,11 +120,13 @@ class RunMgr:
     """
 
     data_dir = "data"
+    label_dir = "run_dump"
     subdirs = {
-        'input': "inputs",
-        'spikes': "spikes",
-        'activity': "activity",
-        'logL_sweep': "likelihood"
+        'input'     : "inputs",
+        'spikes'    : "spikes",
+        'activity'  : "activity",
+        'logL_sweep': "likelihood",
+        'sgd'       : "fits"
         }
     smtlabel = 'cmdline'
         # Either 'cmdline' or None. 'parameters' not currently supported
@@ -154,6 +156,10 @@ class RunMgr:
                                  help="If passed, force the recalculation of data. If a result file "
                                  "matching the given parameters is found, a number is appended to it, "
                                  "allowing the new data to take the expected filename.")
+        self._mgr_argnames = ['parameters', 'recalculate']
+            # This list is used to distinguish internally defined parameters from those
+            # a calling script might add
+
         #self.parser.add_argument('--label', type=str,
         #                         help="Label parameter, automatically provided by Sumatra.",
         #                         default="")
@@ -187,6 +193,8 @@ class RunMgr:
             sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
             basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
             basename += '_'
+        if isinstance(suffix, str):
+            suffix = suffix.lstrip('_')
         if suffix is None or suffix == "":
             assert(len(basename) > 1 and basename[-1] == '_')
             return basename[:-1] # Remove underscore
@@ -201,8 +209,9 @@ class RunMgr:
     def get_pathname(self, params=None, suffix=None, subdir=None, label=""):
         """
         Construct a pathname by hashing a ParameterSet. The resulting path will be
-        [label]/[subdir]/hash([params])_suffix
+        [data_dir]/[label_dir]/[label]/[subdir]/hash([params])_suffix
         All parameters are optional; the effects of their defaults are given below.
+        (data_dir and label_dir are class attributes)
 
         Parameters
         ----------
@@ -234,7 +243,9 @@ class RunMgr:
             subdir = self.subdir
         if label is None:
             label = self.label
-        return os.path.join(self.data_dir, label, subdir,
+        label_dir = "" if label == "" else self.label_dir
+            # Only add the label directory when there's a label
+        return os.path.join(self.data_dir, label_dir, label, subdir,
                             self.get_filename(params, suffix))
 
     @staticmethod
@@ -331,9 +342,13 @@ class RunMgr:
 
         self.recalculate = args.recalculate
 
-        self.params = self._params_to_arrays(parameters.ParameterSet(args.parameters))
+        self.params = self._params_to_arrays(ParameterSet(args.parameters))
         if 'theano' in self.params and self.params.theano:
             shim.load_theano()
+
+        self.args = ParameterSet( {name: val
+                                   for name, val in vars(args).items()
+                                   if name not in self._mgr_argnames} )
 
         # Add flags so that 'params' uniquely identifies this data
         # parameter_flags = ['theano']
@@ -367,7 +382,7 @@ class RunMgr:
     @classmethod
     def _params_to_arrays(cls, params):
         for name, val in params.items():
-            if isinstance(val, parameters.ParameterSet):
+            if isinstance(val, ParameterSet):
                 params[name] = cls._params_to_arrays(val)
             elif (not isinstance(val, str)
                 and isinstance(val, Iterable)
@@ -403,6 +418,39 @@ def get_random_stream(seed=314):
 #         return resolve_linked_param(params[val[:-2]], param_name)
 #     else:
 #         return params[param_name]
+def get_sampler(dists):
+    # var: shared variable to fill with the sample
+    def _get_sample(distparams, var):
+        shape = var.get_value().shape
+        if len(shape) == 0:
+            shape = None
+
+        factor = distparams.factor if 'factor' in distparams else 1
+
+        if distparams.dist == 'normal':
+            return factor * np.random.normal(distparams.params.loc,
+                                    distparams.params.scale, size=shape)
+        elif distparams.dist == 'expnormal':
+            return factor * np.exp(
+                np.random.normal(distparams.params.loc,
+                                 distparams.params.scale, size=shape) )
+        elif distparams.dist == 'mixed':
+            comps = distparams.components
+            distlist = [distparams[comp] for comp in comps]
+            idx = np.random.choice(len(comps), p=distparams.probabilities)
+            return factor * _get_sample(distlist[idx], var)
+        else:
+            raise ValueError("Unrecognized distribution type '{}'."
+                             .format(distparams.dist))
+
+    def sampler(var):
+        if var.name not in dists:
+            raise ValueError("There is no distribution associated to the "
+                             "variable name '{}'.".format(var.name))
+        return _get_sample(dists[var.name], var)
+
+    return sampler
+
 
 def get_model_params(params):
     """Convert a ParameterSet to the internal parameter type used by models.
@@ -441,6 +489,33 @@ def get_model_params(params):
     )
 
     return model_params
+
+def construct_model(model_module, model_params, data_history, input_history, initializer=None):
+    """
+    Parameters
+    ----------
+    model_module: module
+        Models are defined in .py files and imported. This is the imported module instance.
+    model_params: ParameterSet
+        Parameter set defining the model. Must minimally contain:
+           - 'type': Class name in `model_module`. Selects which model will be created.
+           - 'params': The set of parameters expected by the model selected with `type`
+        'initializer' is also usually defined.
+    data_history: History
+        History used as 'data' (e.g. activity, spikes, rate, etc.)
+    input_history: History
+        History used as input when generating/obtaining the data. Typically an instance of Series
+    initializer: str
+        Flag indicating how to initialize the model; the chosen model must define the corresponding
+        initializer.
+        By default the value of `model_params.initializer` is used.
+    """
+    module_params = get_model_params(model_params.params)
+    return getattr(model_module, model_params.type)(
+        module_params,
+        data_history,
+        input_history,
+        initializer=initializer)
 
 ###########################
 # Data processing functions
