@@ -41,7 +41,7 @@ def generate_spikes(mgr):
     # Create the spiking model
     # We check if different run parameters were specified,
     # otherwise those from Ihist will be taken
-    runparams = { name: val for name, val in params.items()
+    runparams = { name: params[name] for name in params.keys()
                    if name in ['t0', 'tn', 'dt'] }
     # TODO: if dt different from Ihist, subsample Ihist
     shist = Spiketrain(Ihist, name='s', pop_sizes = params.model.N, iterative=True,
