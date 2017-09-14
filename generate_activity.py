@@ -21,7 +21,8 @@ def generate_activity(mgr):
     logger.info("Generating new activity data...")
     Ihist = core.subsample(
         Series.from_raw(iotools.loadraw(
-            mgr.get_pathname(mgr.subdirs['input'], params.input))),
+            mgr.get_pathname(params=params.input,
+                             subdir=mgr.subdirs['input']))),
         params.dt)
     # Create the spiking model
     # We check if different run parameters were specified,
