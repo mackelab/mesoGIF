@@ -1294,9 +1294,23 @@ class GIF_mean_field(models.Model):
     def advance(self, stop):
 
         if stop == 'end':
-            stop = self.nbar.tnidx
+            stopidx = self.nbar.tnidx
+        else:
+            stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
 
-        stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
+        # Make sure we don't go beyond given data
+        for h in self.history_set:
+            # HACK: Should exclude kernels
+            if h.name in ['θ_dis', 'θtilde_dis']:
+                continue
+            if h.locked:
+                tn = h.get_time(h._original_tidx.get_value())
+                if tn < self.nbar.get_time(stopidx):
+                    logger.warning("Locked history '{}' is only provided "
+                                   "up to t={}. Output will be truncated."
+                                   .format(h.name, tn))
+                    stopidx = self.nbar.get_t_idx(tn)
+
 
         if not shim.config.use_theano:
             self.nbar[stopidx]
