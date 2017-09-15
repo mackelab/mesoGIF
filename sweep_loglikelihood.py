@@ -17,8 +17,6 @@ from core import logger
 import fsgif_model as gif
 ############################
 
-debug = False
-
 """
 Expected parameter format:
 {
@@ -63,7 +61,7 @@ def sweep_loglikelihood(model, calc_params, output_filename):
         tidx = shim.getT().lscalar('tidx')
         logL_graph, statevar_seqs, shared_upds = model.loglikelihood(tidx, stop_idx-tidx)
         logger.info("Compiling Theano loglikelihood")
-        if not debug:
+        if not mgr.args.debug:
             logL_fn = shim.gettheano().function([tidx], logL_graph)
         else:
             # Also return the full sequence of state variables
@@ -81,8 +79,21 @@ def sweep_loglikelihood(model, calc_params, output_filename):
             return logL_fn(burnin_idx)
     else:
         def logL_fn_wrapper(model):
+            # if core.match_params(model.params,
+            #                      ('w', (0,0), 0.958333),
+            #                      ('τ_m', (1,), 0.013907)):
+            #     res = model.loglikelihood(burnin_idx, stop_idx-burnin_idx)
+            #     print("MLE: ", res[0])
+            #     iotools.save("debug_mle", res)
+            # if core.match_params(model.params,
+            #                      ('w', (0,0), 0.16666),
+            #                      ('τ_m', (1,), 0.019214)):
+            #     res = model.loglikelihood(burnin_idx, stop_idx-burnin_idx)
+            #     print("GT: ", res[0])
+            #     iotools.save("debug_gt", res)
+            # return 1
             res = model.loglikelihood(burnin_idx, stop_idx-burnin_idx)
-            if not debug:
+            if not mgr.args.debug:
                 return res[0]
             else:
                 # Also return the full sequence of state variables
@@ -92,8 +103,10 @@ def sweep_loglikelihood(model, calc_params, output_filename):
     param_sweep.set_function(logL_fn_wrapper, 'log $L$')
 
     # Compute the likelihood
+    if mgr.args.debug:
+        output_filename = None
     t1 = time.perf_counter()
-    loglikelihood = param_sweep.do_sweep(output_filename, debug=debug)
+    loglikelihood = param_sweep.do_sweep(output_filename, debug=False)
             # This can take a long time
             # The result will be saved in output_filename
     t2 = time.perf_counter()
@@ -115,6 +128,9 @@ if __name__ == "__main__":
     #parser = core.argparse.ArgumentParser(description="Generate activity")
     #params, flags = core.load_parameters(parser)
     mgr = core.RunMgr(description="Sweep loglikelihood", calc='logL_sweep')
+    mgr.parser.add_argument('--debug', action='store_true',
+                            help="Indicate to run in debug mode: disables checking for "
+                            "precomputed data and does not save the result.")
     mgr.load_parameters()
     params = mgr.params
 
@@ -129,8 +145,10 @@ if __name__ == "__main__":
                                       subdir=params.input.dir,
                                       suffix=params.input.name,
                                       label='')
-
     try:
+        if mgr.args.debug:
+            # Don't try to load previous data if debugging
+            raise core.FileDoesNotExist
         mgr.load(logL_filename)
     except (core.FileDoesNotExist, core.FileRenamed):
 

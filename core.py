@@ -627,3 +627,59 @@ def exploglikelihood(loglikelihood):
     likelihood.set_norm('linear')
 
     return likelihood
+
+
+##############################
+# Debug helpers
+##############################
+
+def match_params(params, *values):
+    """
+    Check if the values of `params` matches those in `values`.
+    Example: to check whether params.x[0,1] equals 4.1, and
+    params.y equals 1, the call should be
+
+         match_params(params, ('x', (0,1), 4.1), ('y', 1))
+
+    The comparison only considers as many significant digits as provided.
+    TODO: Allow to specifiy sig digits.
+
+    Parameters
+    ----------
+    params: ParameterSet
+
+    *values: tuples
+        One tuple per parameter to check. Each tuple of the form
+        `(name, idx, val)` or `(name, val)`
+        where 'name' is a string and we want to test params.name[idx] == val.
+
+    Returns
+    -------
+    bool
+    """
+    if len(values) == 0:
+        logger.warning("Testing match on zero parameters. This will always return True.")
+        return True
+
+    matches = True
+    for valtuple in values:
+        # Determine number of significant digits / tolerance
+        if abs(valtuple[-1]) >= 1:
+            atol = 10**len(str(int(abs(valtuple[-1]))))
+        else:
+            frac = abs(valtuple[-1]) - int(abs(valtuple[-1]))
+            atol = 10**( - (len(str(frac))-2) )  # -2 for the '0.'
+        if len(valtuple) == 2:
+            # param is a scalar
+            if not sinn.isclose(getattr(params, valtuple[0]), valtuple[-1], atol=atol):
+                matches = False
+                break
+        elif len(valtuple) == 3:
+            # param is an array
+            if not sinn.isclose(getattr(params, valtuple[0])[valtuple[1]], valtuple[-1], atol=atol):
+                matches = False
+                break
+    if matches:
+        pass
+
+    return matches
