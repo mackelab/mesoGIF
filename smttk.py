@@ -1,6 +1,6 @@
 import os
 import re
-import parameters
+from parameters import ParameterSet
 
 import core
 
@@ -40,8 +40,8 @@ else:
         """
         if ext != "" and ext[0] != ".":
             ext = "." + ext
-        old_params = parameters.ParameterSet(src)
-        new_params = parameters.ParameterSet(dst)
+        old_params = ParameterSet(src)
+        new_params = ParameterSet(dst)
         old_filename = core.RunMgr._get_filename(old_params, suffix) + ext
         new_filename = core.RunMgr._get_filename(new_params, suffix) + ext
         old_filename = os.path.join(datadir, old_filename)
@@ -156,6 +156,25 @@ else:
                     os.symlink(rel_new_path, move['old path'])
 
     cli.add_command(archive)
+
+    @click.command()
+    @click.argument("param_file")
+    @click.option("--subdir", default="")
+    @click.option("--suffix", default="")
+    def file_exists(param_file, subdir, suffix):
+        mgr = core.RunMgr()
+        if subdir == "":
+            subdir = None
+        if suffix == "":
+            suffix = None
+
+        pathname = mgr.get_pathname(ParameterSet(param_file), suffix, subdir)
+        if os.path.exists(pathname):
+            print("File '{}' exists.".format(pathname))
+        else:
+            print("File '{}' does not exist.".format(pathname))
+
+    cli.add_command(file_exists)
 
 class MoveList:
     def __init__(self):
