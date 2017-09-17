@@ -114,10 +114,12 @@ def do_gradient_descent(mgr):
             mbatch_size = params.batch_size
         )
 
-        for time_cst in [getattr(model.params, tc_name) for tc_name in params.time_constants]:
-            if time_cst in fitmask:
-                sgd.transform( time_cst, 'log' + time_cst.name,
-                               'τ -> shim.log10(τ)', 'logτ -> 10**logτ' )
+        for transform_desc in params.transforms:
+            sgd.transform(*transform_desc)
+        # for time_cst in [getattr(model.params, tc_name) for tc_name in params.time_constants]:
+        #     if time_cst in fitmask:
+        #         sgd.transform( time_cst, 'log' + time_cst.name,
+        #                        'τ -> shim.log10(τ)', 'logτ -> 10**logτ' )
 
         sgd.verify_transforms(trust_automatically=True)
             # FIXME: Use simple eval, and then this whole verification thing won't be needed
@@ -130,17 +132,49 @@ def do_gradient_descent(mgr):
             sgd.set_ground_truth(core.get_model_params(params.data.params.model))
 
         if init_vals is not None:
-            if isinstance(init_vals, dict):
+            if init_vals.random:
+                if ( 'seed' in init_vals and init_vals.seed is not None ):
+                    np.random.seed(init_vals.seed)
+                logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
+
+            if init_vals.format == 'prior':
+                _fitparams_lst = [ sgd.get_param(name) for name in init_vals.variables ]
+                _init_vals = { p: prior_sampler(p) for p in _fitparams_lst }
+
+            elif init_vals.format == 'cartesian':
                 _init_vals = { sgd.get_param(pname): val
                                for pname, val in init_vals.items() }
-            else:
-                if isinstance(init_vals, int):
-                    np.random.seed(init_vals)
-                elif init_vals != 'random':
-                    raise ValueError("Unrecognized form for `init_vals`: {}".format(init_vals))
-                logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
-                _fitparams_lst = [ sgd.get_param(name) for name in ['c', 'w', 'logτ_m'] ]
-                _init_vals = { p: prior_sampler(p) for p in _fitparams_lst }
+
+            elif init_vals.format in ['polar', 'spherical']:
+                # Get the coordinate angles
+                if init_vals.random:
+                    # All angles except last [0, π)
+                    # Last angle [0, 2π)
+                    angles = np.uniform(0, np.pi, len(init_vals.variables) - 1)
+                    angles[-1] = 2*angles[-1]
+                else:
+                    if len(init_vals.angles) != len(init_vals.variables) - 1:
+                        raise ValueError("Number of coordinate angles (currently {}) must be "
+                                         "one less than the number of variables. (currently {})."
+                                         .format(len(init_vals.angles), len(init_vals.variables)))
+                    angles = init_vals.angles
+
+                # Compute point on the unit sphere
+                sines = np.concatenate(([1], np.sin(angles)))
+                cosines = np.concatenate((np.cos(angles), [1]))
+                unit_vals = np.cumprod(sines) * cosines
+
+                # rescale coords
+                rescaled_vals = np.array([val * radius
+                                          for radius, val in zip(radii, unit_vals)])
+
+                # add the centre
+                _init_vals_values = np.array(centre) + rescaled_vals
+
+                # construct the initial value dictionary
+                _init_vals = { sgd.get_param(pname): val
+                               for pname, val in zip(init_vals.variables,
+                                                     _init_vals_values.items()) }
 
             sgd.initialize(_init_vals, fitmask)
                 # Specifying fitmask ensures that parameters which
@@ -207,6 +241,5 @@ if __name__ == "__main__":
     sgd, n_iterations = do_gradient_descent(mgr)
 
     if sgd is not None:
-        import pdb; pdb.set_trace()
         output_filename = get_sgd_pathname(mgr, n_iterations)
         iotools.saveraw(output_filename, sgd)
