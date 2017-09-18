@@ -98,7 +98,7 @@ def do_gradient_descent(mgr):
     prior_sampler = core.get_sampler(params.model.prior)
 
     model = core.construct_model(gif, params.model, data_history, input_history,
-                                    initializer=params.model.initializer)
+                                 initializer=params.model.initializer)
 
     fitmask = get_fitmask(model, mgr.params)
 
@@ -113,9 +113,15 @@ def do_gradient_descent(mgr):
             datalen = params.datalen,
             mbatch_size = params.batch_size
         )
+        sgd.set_fitparams(fitmask)
 
         for transform_desc in params.transforms:
-            sgd.transform(*transform_desc)
+            try:
+                var = sgd.get_param(transform_desc[0])
+            except KeyError:
+                pass
+            else:
+                sgd.transform(var, *transform_desc[1:])
         # for time_cst in [getattr(model.params, tc_name) for tc_name in params.time_constants]:
         #     if time_cst in fitmask:
         #         sgd.transform( time_cst, 'log' + time_cst.name,
@@ -124,7 +130,6 @@ def do_gradient_descent(mgr):
         sgd.verify_transforms(trust_automatically=True)
             # FIXME: Use simple eval, and then this whole verification thing won't be needed
 
-        sgd.set_fitparams(fitmask)
         # If the parameters which generated the data are known, set them as ground truth
         if ( 'params' in params.data and isinstance(params.data, ParameterSet)
              and 'model' in params.data.params
@@ -146,6 +151,9 @@ def do_gradient_descent(mgr):
                                for pname, val in init_vals.items() }
 
             elif init_vals.format in ['polar', 'spherical']:
+                # TODO: Work with multi-dim parameters (will need
+                # to flatten and treat each component as a parameter)
+
                 # Get the coordinate angles
                 if init_vals.random:
                     # All angles except last [0, π)
@@ -165,16 +173,18 @@ def do_gradient_descent(mgr):
                 unit_vals = np.cumprod(sines) * cosines
 
                 # rescale coords
-                rescaled_vals = np.array([val * radius
-                                          for radius, val in zip(radii, unit_vals)])
+                rescaled_vals = np.array([val * init_vals.radii[name]
+                                          for name, val in zip(init_vals.variables, unit_vals)])
 
                 # add the centre
-                _init_vals_values = np.array(centre) + rescaled_vals
+                centre = np.fromiter( (init_vals.centre[name] for name in init_vals.variables),
+                                       dtype=sinn.config.floatX )
+                _init_vals_values = centre + rescaled_vals
 
                 # construct the initial value dictionary
-                _init_vals = { sgd.get_param(pname): val
-                               for pname, val in zip(init_vals.variables,
-                                                     _init_vals_values.items()) }
+                _init_vals = { sgd.get_param(name): val
+                               for name, val in zip(init_vals.variables,
+                                                    _init_vals_values) }
 
             sgd.initialize(_init_vals, fitmask)
                 # Specifying fitmask ensures that parameters which
@@ -225,7 +235,8 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
     if iterations is not None:
         assert(isinstance(iterations, int))
         suffix += '_' + str(iterations)
-    return mgr.get_pathname(sgd_params, suffix=suffix, **kwargs)
+    return mgr.get_pathname(sgd_params, subdir='+testrun',
+                            suffix=suffix, **kwargs)
 
 if __name__ == "__main__":
     core.init_logging_handlers()

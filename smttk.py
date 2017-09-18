@@ -1,5 +1,6 @@
 import os
 import re
+import glob
 from parameters import ParameterSet
 
 import core
@@ -168,11 +169,14 @@ else:
         if suffix == "":
             suffix = None
 
-        pathname = mgr.get_pathname(ParameterSet(param_file), suffix, subdir)
-        if os.path.exists(pathname):
-            print("File '{}' exists.".format(pathname))
+        searchname = mgr.get_pathname(ParameterSet(param_file), suffix, subdir)
+        pathnames = glob.glob(searchname + "*")
+        if len(pathnames) > 0:
+            print("The following matching files were found:")
+            for path in pathnames:
+                print(path)
         else:
-            print("File '{}' does not exist.".format(pathname))
+            print("No file matching '{}' was found.".format(pathname))
 
     cli.add_command(file_exists)
 

@@ -1332,10 +1332,10 @@ class GIF_mean_field(models.Model):
                 for hist in self.statehists:
                     outputs_info.append( hist._data[curtidx_var + hist.t0idx])
                     # HACK-y !!
-                    if hist.name == 'v':
-                        outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
-                    elif hist.name == 'z':
-                        outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
+                    # if hist.name == 'v':
+                    #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
+                    # elif hist.name == 'z':
+                    #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
 
                 outputs, upds = shim.gettheano().scan(onestep,
                                                       sequences = shim.getT().arange(curtidx_var+1, stopidx_var),
@@ -1434,10 +1434,10 @@ class GIF_mean_field(models.Model):
             for hist in self.statehists:
                 outputs_info.append( hist._data[startidx + hist.t0idx - 1] )
                 # HACK !!
-                if hist.name == 'v':
-                    outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
-                elif hist.name == 'z':
-                    outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
+                # if hist.name == 'v':
+                #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
+                # elif hist.name == 'z':
+                #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
             if batch_size == 1:
                 # No need for scan
                 outputs, upds = logLstep(start, *outputs_info)

@@ -228,6 +228,9 @@ class RunMgr:
             Subdirectory (below the label) in which to put/get the file.
             Default is to use the subdirectory defined by the run manager's 'calc' attribute.
             (see RunMgr.__init__)
+            If the string begins with '+', it is appended to the default subdirectry.
+            I.e. if the latter is 'likelihood' and subdir is '+run1', then the returned
+            path will contain 'likelihood/run1' as a subdirectory.
 
         label: str or None
             Prefix directory. This matches the use of Sumatra for the 'label' being a run-
@@ -241,6 +244,8 @@ class RunMgr:
             raise RuntimeError("You must call `load_parameters` before getting a path name.")
         if subdir is None:
             subdir = self.subdir
+        elif subdir[0] == '+':
+            subdir = os.path.join(self.subdir, subdir[1:])
         if label is None:
             label = self.label
         label_dir = "" if label == "" else self.label_dir
