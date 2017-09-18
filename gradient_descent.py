@@ -151,42 +151,84 @@ def do_gradient_descent(mgr):
                                for pname, val in init_vals.items() }
 
             elif init_vals.format in ['polar', 'spherical']:
-                # TODO: Work with multi-dim parameters (will need
-                # to flatten and treat each component as a parameter)
+
+                # The total number of variables is the sum of each variable's number of elements
+                curvals = {varname: sgd.get_param(varname).get_value()
+                            for varname in init_vals.variables}
+                nvars = sum( np.prod(var.shape) if hasattr(var, 'shape') else 1
+                             for var in curvals.values() )
 
                 # Get the coordinate angles
                 if init_vals.random:
                     # All angles except last [0, π)
                     # Last angle [0, 2π)
-                    angles = np.uniform(0, np.pi, len(init_vals.variables) - 1)
+                    angles = np.uniform(0, np.pi, nvars - 1)
                     angles[-1] = 2*angles[-1]
                 else:
-                    if len(init_vals.angles) != len(init_vals.variables) - 1:
+                    # The angles may be given with nested structure; this is just to help
+                    # legibility, so flatten everything.
+                    angles = np.concatenate([np.array(a).flatten() for a in init_vals.angles])
+                    if len(angles) != nvars - 1:
                         raise ValueError("Number of coordinate angles (currently {}) must be "
                                          "one less than the number of variables. (currently {})."
                                          .format(len(init_vals.angles), len(init_vals.variables)))
-                    angles = init_vals.angles
 
                 # Compute point on the unit sphere
                 sines = np.concatenate(([1], np.sin(angles)))
                 cosines = np.concatenate((np.cos(angles), [1]))
-                unit_vals = np.cumprod(sines) * cosines
+                unit_vals_flat = np.cumprod(sines) * cosines
+                # "unflatten" the coordinates
+                unit_vals = []
+                i = 0
+                for name, val in curvals.items():
+                    if shim.isscalar(val):
+                        unit_vals.append(unit_vals_flat[i])
+                        i += 1
+                    else:
+                        varlen = np.prod(val.shape)
+                        unit_vals.append(unit_vals_flat[i:i+varlen].reshape(val.shape))
+                        i += varlen
 
                 # rescale coords
-                rescaled_vals = np.array([val * init_vals.radii[name]
-                                          for name, val in zip(init_vals.variables, unit_vals)])
+                radii = []
+                for varname, var in curvals.items():
+                    radius = init_vals.radii[varname]
+                    if shim.isscalar(var):
+                        radii.append(radius)
+                    else:
+                        if shim.isscalar(radius):
+                            radii.append( np.ones(var.shape) * radius )
+                        else:
+                            if radius.shape != var.shape:
+                                raise ValueError("The given radius has shape '{}'. It should "
+                                                 "either be scalar, or of shape '{}'."
+                                                 .format(radius.shape, var.shape))
+                            radii.append(radius)
+                rescaled_vals = [val * radius for val, radius in zip(unit_vals, radii)]
 
                 # add the centre
-                centre = np.fromiter( (init_vals.centre[name] for name in init_vals.variables),
-                                       dtype=sinn.config.floatX )
-                _init_vals_values = centre + rescaled_vals
+                centre = []
+                for varname, var in curvals.items():
+                    comp = init_vals.centre[varname]
+                    if shim.isscalar(var):
+                        centre.append(comp)
+                    else:
+                        if shim.isscalar(comp):
+                            centre.append( np.ones(var.shape) * comp )
+                        else:
+                            if comp.shape != var.shape:
+                                raise ValueError("The given centre component has shape '{}'. It should "
+                                                 "either be scalar, or of shape '{}'."
+                                                 .format(comp.shape, var.shape))
+                            centre.append(comp)
+                _init_vals_values = [c + r for c, r in zip(centre, rescaled_vals)]
 
                 # construct the initial value dictionary
-                _init_vals = { sgd.get_param(name): val
-                               for name, val in zip(init_vals.variables,
-                                                    _init_vals_values) }
+                _init_vals_dict = { sgd.get_param(name): val
+                                    for name, val in zip(curvals.keys(),
+                                                         _init_vals_values) }
 
-            sgd.initialize(_init_vals, fitmask)
+            sgd.initialize(_init_vals_dict, fitmask)
                 # Specifying fitmask ensures that parameters which
                 # are not being fit are left at the ground truth value
 
@@ -227,16 +269,32 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
     Calculate the filename with a reduced parameter set, where the parameters
     defining the number of iterations are removed.
     This allows continuing a fit on a subsequent run.
+    Pathnames are organized hierarchically as [fitdir]/[data]/[sgd]/[init_vals], where
+    [init_vals] is the filename. [model], [sgd] and [init_vals] are computed by hashing
+    the appropriate parameters.
     """
 
-    sgd_params = copy.deepcopy(mgr.params)
-    del sgd_params['max_iterations']
     suffix = kwargs.pop('suffix', '')
     if iterations is not None:
         assert(isinstance(iterations, int))
         suffix += '_' + str(iterations)
-    return mgr.get_pathname(sgd_params, subdir='+testrun',
-                            suffix=suffix, **kwargs)
+
+    sgd_params = copy.deepcopy(mgr.params)
+    del sgd_params['max_iterations']
+    init_params = sgd_params.init_vals
+    del sgd_params['init_vals']
+    data_keys = ['data', 'input', 'model']
+    data_params = ParameterSet({key: sgd_params[key] for key in data_keys})
+    for key in data_keys:
+        del sgd_params[key]
+
+    datahash = mgr.get_filename(data_params)
+    sgdhash = mgr.get_filename(sgd_params)
+
+    return mgr.get_pathname(init_params,
+                            subdir='+' + datahash + '/' + sgdhash,
+                            suffix=suffix,
+                            **kwargs)
 
 if __name__ == "__main__":
     core.init_logging_handlers()
