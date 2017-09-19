@@ -1,7 +1,7 @@
 import os.path
 import copy
 import numpy as np
-from collections import Iterable
+from collections import Iterable, OrderedDict
 import glob
 
 from parameters import ParameterSet
@@ -151,8 +151,8 @@ def do_gradient_descent(mgr):
             elif init_vals.format in ['polar', 'spherical']:
 
                 # The total number of variables is the sum of each variable's number of elements
-                curvals = {varname: sgd.get_param(varname).get_value()
-                            for varname in init_vals.variables}
+                curvals = OrderedDict( (varname, sgd.get_param(varname).get_value())
+                                       for varname in init_vals.variables )
                 nvars = sum( np.prod(var.shape) if hasattr(var, 'shape') else 1
                              for var in curvals.values() )
 
@@ -252,6 +252,7 @@ def do_gradient_descent(mgr):
 
     # And finally iterate for the desired number of steps
 
+    logger.info("Starting gradient descent fit...")
     sgd.iterate(Nmax=params.max_iterations,
                 cost_calc=params.cost_calc,
                 **params.cost_calc_params)
