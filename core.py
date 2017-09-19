@@ -386,8 +386,9 @@ class RunMgr:
 
     @classmethod
     def _params_to_arrays(cls, params):
+        """Also converts dictionaries to parameter sets."""
         for name, val in params.items():
-            if isinstance(val, ParameterSet):
+            if isinstance(val, (ParameterSet, dict)):
                 params[name] = cls._params_to_arrays(val)
             elif (not isinstance(val, str)
                 and isinstance(val, Iterable)
@@ -395,7 +396,38 @@ class RunMgr:
                     # The last condition leaves objects like ('lin', 0, 1) as-is;
                     # otherwise they would be casted to a single type
                 params[name] = np.array(val)
-        return params
+        return ParameterSet(params)
+
+def _split_number(s):
+    start_i = -1
+    for i, c in enumerate(s):
+        if c.isdigit():
+            start_i = i
+            break
+    if start_i == -1:
+        return s, None
+    else:
+        assert(s[start_i:].isdigit())
+    return s[:start_i], s[start_i:]
+
+def get_suffixes(filename):
+    basename, _ = os.path.splitext(os.path.basename(filename))
+    suffixes = basename.split("_")[1:]
+    return {key: val
+            for key, val in
+            [_split_number(suffix) for suffix in suffixes]}
+
+def isarchived(filename):
+    """
+    Return True if a file is archived and should be ignored.
+    Archived files are recognized by having a trailing, numerical-only suffix
+    """
+    basename, _ = os.path.splitext(os.path.basename(filename))
+    suffixes = basename.split("_")[1:]
+    if len(suffixes) > 0 and suffixes[-1].isdigit():
+        return True
+    else:
+        return False
 
 def get_random_stream(seed=314):
     global rndstream, stream_seed

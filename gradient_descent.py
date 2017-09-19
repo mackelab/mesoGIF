@@ -42,18 +42,16 @@ def do_gradient_descent(mgr):
 
     # First check if there are any previous runs
     pathname, ext = os.path.splitext(sgd_filename)
-    prev_runs = glob.glob(pathname + '_*' + ext)
+    prev_runs = glob.glob(pathname + '_*iterations*' + ext)
+    prev_runs = [run for run in prev_runs if not core.isarchived(run)] # Filter out archived runs
     if len(prev_runs) > 0:
         # There has been a previous run
         # Find the latest one
         def get_run_N(_pname):
-            _, _pext = os.path.splitext(_pname)
-            if len(_pext) > 0:
-                numstr = _pname[len(pathname):-len(_pext)]
-            else:
-                numstr = _pname[len(pathname):]
-            numstr = numstr.lstrip('_')
-            assert(c in '01234567889' for c in numstr)
+            suffixes = core.get_suffixes(_pname)
+            if 'iterations' in suffixes:
+                numstr = suffixes['iterations']
+                assert(numstr is not None)
             return int(numstr)
         latest = prev_runs[0]
         latest_N = get_run_N(latest)
@@ -277,7 +275,7 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
     suffix = kwargs.pop('suffix', '')
     if iterations is not None:
         assert(isinstance(iterations, int))
-        suffix += '_' + str(iterations)
+        suffix += '_iterations' + str(iterations)
 
     sgd_params = copy.deepcopy(mgr.params)
     del sgd_params['max_iterations']
