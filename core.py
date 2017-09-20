@@ -90,7 +90,7 @@ class FileRenamed(Exception):
 ###########################
 
 ###########################
-# Project manager
+# Run manager
 ###########################
 
 class RunMgr:
