@@ -263,6 +263,26 @@ def do_gradient_descent(mgr):
 def get_fitmask(model, fit_params):
     return { getattr(model.params, name) : mask for name, mask in fit_params.fitmask.items() }
 
+def get_param_hierarchy(mgr):
+    """
+    Return a list of mutually exclusive ParameterSets, each subsequent set corresponding to
+    a nested directory.
+    """
+    sgd_params = copy.deepcopy(mgr.params)
+    # Parameters we never care about saving
+    del sgd_params['max_iterations']
+    # Initial value parameters - deepest level
+    init_params = sgd_params.init_vals
+    del sgd_params['init_vals']
+    # Dataset parameters
+    data_keys = ['data', 'input', 'model']
+    data_params = ParameterSet({key: sgd_params[key] for key in data_keys})
+    for key in data_keys:
+        del sgd_params[key]
+
+    return [data_params, sgd_params, init_params]
+
+
 def get_sgd_pathname(mgr, iterations=None, **kwargs):
     """
     Calculate the filename with a reduced parameter set, where the parameters
@@ -278,17 +298,10 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
         assert(isinstance(iterations, int))
         suffix += '_iterations' + str(iterations)
 
-    sgd_params = copy.deepcopy(mgr.params)
-    del sgd_params['max_iterations']
-    init_params = sgd_params.init_vals
-    del sgd_params['init_vals']
-    data_keys = ['data', 'input', 'model']
-    data_params = ParameterSet({key: sgd_params[key] for key in data_keys})
-    for key in data_keys:
-        del sgd_params[key]
-
-    datahash = mgr.get_filename(data_params)
-    sgdhash = mgr.get_filename(sgd_params)
+    param_hierarchy = get_param_hierarchy(mgr)
+    datahash = mgr.get_filename(param_hierarchy[0])
+    sgdhash = mgr.get_filename(param_hierarchy[1])
+    init_params = param_hierarchy[2]
 
     return mgr.get_pathname(init_params,
                             subdir='+' + datahash + '/' + sgdhash,
