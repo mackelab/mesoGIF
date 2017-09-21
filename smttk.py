@@ -92,11 +92,13 @@ else:
         TODO: Something sane when the target file already exists
         """
 
-        lbl_pattern = '[0-9]{8}-[0-9]{6}'
+        lbl_pattern = '[0-9]{8}-[0-9]{6}(_[0-9]+)?'
 
         move_list = MoveList()
         for dirname in os.listdir(os.path.join(datadir, dumpdir)):
-            if re.fullmatch(lbl_pattern, dirname):
+            if re.fullmatch(lbl_pattern, dirname) is None:
+                logger.warning("Directory {} does not match the label pattern. Skipping.")
+            else:
                 # This is a label directory
                 path = os.path.join(datadir, dumpdir, dirname)
                 ## Loop over every file it contains
@@ -152,6 +154,9 @@ else:
                     renamed_path = rename_to_free_file(move['new path'])
                     print("Previous file '{}' was renamed to '{}'"
                         .format(move['new path'], renamed_path))
+                else:
+                    # Make sure the directory hierarchy exists
+                    os.makedirs(os.path.dirname(move['new path']), exist_ok=True)
 
                 os.rename(move['old path'], move['new path'])
                 print("Refiled '{}' to the common directory."
