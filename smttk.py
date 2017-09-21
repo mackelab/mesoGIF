@@ -2,6 +2,7 @@ import os
 import re
 import glob
 import multiprocessing
+from datetime import datetime
 from parameters import ParameterSet
 import sumatra.commands
 
@@ -197,7 +198,7 @@ else:
                   "the command(s) that would be executed. The expanded parameter "
                   "files are left in the temporary directory to allow inspection.")
     @click.option("-n", "--cores", default=1)
-    @click.option("-m", "--script", nargs=1)
+    @click.option("-m", "--script", nargs=1, prompt=True)
     @click.option("--max-tasks", default=1000)
     @click.argument("args", nargs=-1)
     @click.argument("params", nargs=1)
@@ -207,21 +208,38 @@ else:
         param_paths = mackelab.parameters.expand_param_file(
             params, tmpparam_path, max_files=max_tasks)
 
-        argv_list = [ "-m " + script + " ".join(args) + " " + param_file
-                      for param_file in param_paths]
+        # We need to generate our own label, as Sumatra's default is to use a timestamp
+        # which is precise up to seconds. Thus jobs launched simultaneously would have the
+        # same label. To avoid this, we generate our own label by appending a run-specific
+        # number to the default time stamp label
+
+        # Generate a timestamp label same as Sumatra's default
+        timestamp = datetime.now()
+        label = str(timestamp.strftime(sumatra.core.TIMESTAMP_FORMAT))
+            # Same function as used in sumatra.records.Record
+
+        argv_list = [ "-m {} --label {}_{} {} {}"
+                      .format(script, label, i, " ".join(args), param_file)
+                      for i, param_file in enumerate(param_paths, start=1)]
         if dry_run:
             # Dry-run
             print("With these arguments, the following calls would "
-                  "distributed between {} processes:"
-                  .format(cores))
+                  "distributed between {} processe{}:"
+                  .format(cores, '' if cores == 1 else 's'))
             for argv in argv_list:
                 print("smt run " + argv)
         else:
-            with multiprocessing.Pool(cores) as pool:
-                pool.map(_smtrun, argv_list)
+            if cores == 1:
+                # Don't use multiprocessing. This is especially useful for debugging,
+                # as execution is kept within this process
+                for argv in argv_list:
+                    _smtrun(argv)
+            else:
+                with multiprocessing.Pool(cores) as pool:
+                    pool.map(_smtrun, argv_list)
 
     def _smtrun(argv_str):
-        return sumatra.commands.run(argv_str.split(' '))
+        return sumatra.commands.run(argv_str.split())
 
     cli.add_command(run)
 
