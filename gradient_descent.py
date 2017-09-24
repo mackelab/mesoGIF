@@ -142,11 +142,11 @@ def do_gradient_descent(mgr):
 
             if init_vals.format == 'prior':
                 _fitparams_lst = [ sgd.get_param(name) for name in init_vals.variables ]
-                _init_vals = { p: prior_sampler(p) for p in _fitparams_lst }
+                _init_vals_dict = { p: prior_sampler(p) for p in _fitparams_lst }
 
             elif init_vals.format == 'cartesian':
-                _init_vals = { sgd.get_param(pname): val
-                               for pname, val in init_vals.items() }
+                _init_vals_dict = { sgd.get_param(pname): init_vals[pname]
+                               for pname in init_vals.variables }
 
             elif init_vals.format in ['polar', 'spherical']:
 
