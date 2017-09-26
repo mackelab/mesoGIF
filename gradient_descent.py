@@ -20,6 +20,20 @@ import fsgif_model as gif
 ############################
 
 def do_gradient_descent(mgr):
+
+    # Create the sgd object
+    sgd = get_sgd(mgr)
+
+    # Iterate for the desired number of steps
+
+    logger.info("Starting gradient descent fit...")
+    sgd.iterate(Nmax=mgr.params.max_iterations,
+                cost_calc=mgr.params.cost_calc,
+                **mgr.params.cost_calc_params)
+
+    return sgd, sgd.step_i
+
+def get_sgd(mgr, check_previous_runs=True):
     params = mgr.params
 
     if 'init_vals' not in params or params.init_vals is None:
@@ -40,40 +54,47 @@ def do_gradient_descent(mgr):
                                       suffix=params.input.name,
                                       label='')
 
-    # First check if there are any previous runs
-    pathname, ext = os.path.splitext(sgd_filename)
-    prev_runs = glob.glob(pathname + '_*iterations*' + ext)
-    prev_runs = [run for run in prev_runs if not core.isarchived(run)] # Filter out archived runs
-    if len(prev_runs) > 0:
-        # There has been a previous run
-        # Find the latest one
-        def get_run_N(_pname):
-            suffixes = core.get_suffixes(_pname)
-            if 'iterations' in suffixes:
-                numstr = suffixes['iterations']
-                assert(numstr is not None)
-            return int(numstr)
-        latest = prev_runs[0]
-        latest_N = get_run_N(latest)
-        for fname in prev_runs[1:]:
-            N = get_run_N(fname)
-            if N > latest_N:
-                latest = fname
-                latest_N = N
+    if check_previous_runs:
+        # First check if there are any previous runs
+        pathname, ext = os.path.splitext(sgd_filename)
+        prev_runs = glob.glob(pathname + '_*iterations*' + ext)
+        prev_runs = [run for run in prev_runs if not core.isarchived(run)] # Filter out archived runs
+        if len(prev_runs) > 0:
+            # There has been a previous run
+            # Find the latest one
+            def get_run_N(_pname):
+                suffixes = core.get_suffixes(_pname)
+                if 'iterations' in suffixes:
+                    numstr = suffixes['iterations']
+                    assert(numstr is not None)
+                return int(numstr)
+            latest = prev_runs[0]
+            latest_N = get_run_N(latest)
+            for fname in prev_runs[1:]:
+                N = get_run_N(fname)
+                if N > latest_N:
+                    latest = fname
+                    latest_N = N
 
-        # Now load the sgd file
-        try:
-            sgdraw = mgr.load(latest)
-        except (core.FileDoesNotExist, core.FileRenamed):
-            new_run = True
+            # Now load the sgd file
+            try:
+                sgdraw = mgr.load(latest)
+            except (core.FileDoesNotExist, core.FileRenamed):
+                new_run = True
+            else:
+                new_run = False
+
+            try:
+                if not mgr.args.resume:
+                    # Don't resume: just reload the previous run
+                    return None, latest_N
+            except AttributeError:
+                # Default is not to resume
+                return None, latest_N
         else:
-            new_run = False
-
-        if not mgr.args.resume:
-            # Don't resume: just reload the previous run
-            return None, latest_N
+            # There are no previous runs
+            new_run = True
     else:
-        # There are no previous runs
         new_run = True
 
 
@@ -107,8 +128,9 @@ def do_gradient_descent(mgr):
             cost = model.loglikelihood,
             optimizer = params.optimizer,
             model = model,
-            burnin = params.burnin,
+            start = params.start,
             datalen = params.datalen,
+            burnin = params.burnin,
             mbatch_size = params.batch_size
         )
         sgd.set_fitparams(fitmask)
@@ -250,15 +272,9 @@ def do_gradient_descent(mgr):
     sgd.compile( lr = params.learning_rate )
     logger.info("Done.")
 
-    # And finally iterate for the desired number of steps
+    # Finally return the ready-to-go sgd instance
 
-    logger.info("Starting gradient descent fit...")
-    sgd.iterate(Nmax=params.max_iterations,
-                cost_calc=params.cost_calc,
-                **params.cost_calc_params)
-
-    return sgd, sgd.step_i
-
+    return sgd
 
 def get_fitmask(model, fit_params):
     return { getattr(model.params, name) : mask for name, mask in fit_params.fitmask.items() }
