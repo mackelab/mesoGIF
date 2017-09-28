@@ -83,20 +83,19 @@ def get_sgd(mgr, check_previous_runs=True):
                 new_run = True
             else:
                 new_run = False
+                try:
+                    if not mgr.args.resume:
+                        # Don't resume: just reload the previous run
+                        new_run = True
+                except AttributeError:
+                    # Default is not to resume
+                    new_run = True
 
-            try:
-                if not mgr.args.resume:
-                    # Don't resume: just reload the previous run
-                    return None, latest_N
-            except AttributeError:
-                # Default is not to resume
-                return None, latest_N
         else:
             # There are no previous runs
             new_run = True
     else:
         new_run = True
-
 
     # Load the data and model to fit. This is required whether or not
     # sgd was loaded from a previous run file
