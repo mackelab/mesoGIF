@@ -83,7 +83,7 @@ stream_seed = None
 ###########################
 class FileExists(Exception):
     pass
-class FileDoesNotExist(Exception):
+class FileNotFound(Exception):
     pass
 class FileRenamed(Exception):
     pass
@@ -305,7 +305,7 @@ class RunMgr:
             data, datapath = self.load_fn(pathname, return_path=True)
         except IOError:
             # This data does not exist
-            raise FileDoesNotExist("File '{}' does not exist."
+            raise FileNotFound("File '{}' does not exist."
                                    .format(pathname))
         else:
             if recalculate:

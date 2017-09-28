@@ -31,8 +31,8 @@ def do_gradient_descent(mgr):
         return None, sgd.step_i
 
     # Compile the optimizer
-    logger.info("Compiling {} optimizer...".format(params.optimizer))
-    sgd.compile( lr = params.learning_rate )
+    logger.info("Compiling {} optimizer...".format(mgr.params.optimizer))
+    sgd.compile( lr = mgr.params.learning_rate )
     logger.info("Done.")
 
     # Do the fit
@@ -42,6 +42,36 @@ def do_gradient_descent(mgr):
                 **mgr.params.cost_calc_params)
 
     return sgd, sgd.step_i
+
+def load_latest(mgr, pathname):
+    # TODO: Move to RunMgr
+    # First check if there are any previous runs
+    _pathname, ext = os.path.splitext(pathname)
+    prev_runs = glob.glob(_pathname + '_*iterations*' + ext)
+    prev_runs = [run for run in prev_runs
+                 if not core.isarchived(run)
+                    and os.path.isfile(run)]
+        # Filter out archived runs and directories
+    if len(prev_runs) > 0:
+        # There has been a previous run
+        # Find the latest one
+        def get_run_N(_pname):
+            suffixes = core.get_suffixes(_pname)
+            if 'iterations' in suffixes:
+                numstr = suffixes['iterations']
+                assert(numstr is not None)
+            return int(numstr)
+        latest = prev_runs[0]
+        latest_N = get_run_N(latest)
+        for fname in prev_runs[1:]:
+            N = get_run_N(fname)
+            if N > latest_N:
+                latest = fname
+                latest_N = N
+    else:
+        raise core.FileNotFound
+
+    return mgr.load(latest), latest
 
 def get_sgd(mgr, check_previous_runs=True):
     params = mgr.params
@@ -65,44 +95,21 @@ def get_sgd(mgr, check_previous_runs=True):
                                       label='')
 
     if check_previous_runs:
-        # First check if there are any previous runs
-        pathname, ext = os.path.splitext(sgd_filename)
-        prev_runs = glob.glob(pathname + '_*iterations*' + ext)
-        prev_runs = [run for run in prev_runs if not core.isarchived(run)] # Filter out archived runs
-        if len(prev_runs) > 0:
-            # There has been a previous run
-            # Find the latest one
-            def get_run_N(_pname):
-                suffixes = core.get_suffixes(_pname)
-                if 'iterations' in suffixes:
-                    numstr = suffixes['iterations']
-                    assert(numstr is not None)
-                return int(numstr)
-            latest = prev_runs[0]
-            latest_N = get_run_N(latest)
-            for fname in prev_runs[1:]:
-                N = get_run_N(fname)
-                if N > latest_N:
-                    latest = fname
-                    latest_N = N
-
-            # Now load the sgd file
-            try:
-                sgdraw = mgr.load(latest)
-            except (core.FileDoesNotExist, core.FileRenamed):
-                new_run = True
-            else:
-                new_run = False
-                try:
-                    if not mgr.args.resume:
-                        # Don't resume: just reload the previous run
-                        new_run = True
-                except AttributeError:
-                    # Default is to resume
-                    pass
-        else:
+        # Now load the sgd file
+        try:
+            sgdraw, _ = load_latest(mgr, sgd_filename)
+        except (core.FileNotFound, core.FileRenamed):
             # There are no previous runs
             new_run = True
+        else:
+            new_run = False
+            try:
+                if not mgr.args.resume:
+                    # Don't resume: just reload the previous run
+                    new_run = True
+            except AttributeError:
+                # Default is to resume
+                pass
     else:
         new_run = True
 
@@ -281,12 +288,12 @@ def get_sgd(mgr, check_previous_runs=True):
 def get_fitmask(model, fit_params):
     return { getattr(model.params, name) : mask for name, mask in fit_params.fitmask.items() }
 
-def get_param_hierarchy(mgr):
+def get_param_hierarchy(params):
     """
     Return a list of mutually exclusive ParameterSets, each subsequent set corresponding to
     a nested directory.
     """
-    sgd_params = copy.deepcopy(mgr.params)
+    sgd_params = copy.deepcopy(params)
     # Parameters we never care about saving
     del sgd_params['max_iterations']
     # Initial value parameters - deepest level
@@ -316,7 +323,7 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
         assert(isinstance(iterations, int))
         suffix += '_iterations' + str(iterations)
 
-    param_hierarchy = get_param_hierarchy(mgr)
+    param_hierarchy = get_param_hierarchy(mgr.params)
     datahash = mgr.get_filename(param_hierarchy[0])
     sgdhash = mgr.get_filename(param_hierarchy[1])
     init_params = param_hierarchy[2]
