@@ -25,7 +25,17 @@ def do_gradient_descent(mgr):
     sgd = get_sgd(mgr)
 
     # Iterate for the desired number of steps
+    if sgd.step_i >= mgr.params.max_iterations:
+        # TODO Add convergence check (don't compile if converged, even if step_i < max_iterations
+        logger.info("Precomputed gradient descent found. Skipping fit.")
+        return None, sgd.step_i
 
+    # Compile the optimizer
+    logger.info("Compiling {} optimizer...".format(params.optimizer))
+    sgd.compile( lr = params.learning_rate )
+    logger.info("Done.")
+
+    # Do the fit
     logger.info("Starting gradient descent fit...")
     sgd.iterate(Nmax=mgr.params.max_iterations,
                 cost_calc=mgr.params.cost_calc,
@@ -88,9 +98,8 @@ def get_sgd(mgr, check_previous_runs=True):
                         # Don't resume: just reload the previous run
                         new_run = True
                 except AttributeError:
-                    # Default is not to resume
-                    new_run = True
-
+                    # Default is to resume
+                    pass
         else:
             # There are no previous runs
             new_run = True
@@ -265,13 +274,7 @@ def get_sgd(mgr, check_previous_runs=True):
         sgd.set_params_to_evols()
 
     # SGD instance has been either created or reloaded
-    # Now compile the optimizer
-
-    logger.info("Compiling {} optimizer...".format(params.optimizer))
-    sgd.compile( lr = params.learning_rate )
-    logger.info("Done.")
-
-    # Finally return the ready-to-go sgd instance
+    # It's not compiled yet: caller may find that the fit is already done, and not need to be compiled
 
     return sgd
 
@@ -326,10 +329,10 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
 if __name__ == "__main__":
     core.init_logging_handlers()
     mgr = core.RunMgr(description="Gradient descent", calc='sgd')
-    mgr.parser.add_argument('--resume', action='store_true',
-                            help='Indicate to resume iterating the gradient descent '
-                              'from a previous run, if one can be found. Default is '
-                              'to return a found previous run, without continuing.')
+    mgr.parser.add_argument('--resume', action='store_false',
+                            help='Indicates whether to resume iterating the gradient descent '
+                              'from a previous run, if one exists, or start a new fit. '
+                              'Default is to continue from an existing fit.')
     mgr.load_parameters()
 
     shim.load_theano()
