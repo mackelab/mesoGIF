@@ -399,6 +399,10 @@ class RunMgr:
         return ParameterSet(params)
 
 def _split_number(s):
+    """
+    Split a string on the first character which is a number.
+    If no number is found, returns `s, None`.
+    """
     start_i = -1
     for i, c in enumerate(s):
         if c.isdigit():
@@ -428,6 +432,93 @@ def isarchived(filename):
         return True
     else:
         return False
+
+def get_param_values(param_desc):
+    """
+    Takes a description of parameters in a particular format, and
+    converts to a 'cartesian' format.
+    param_desc may include the 'random' key, in which case an
+    appropriate random value is returned.
+    """
+    if 'random' in param_desc and param_desc.random:
+        if ( 'seed' in param_desc and param_desc.seed is not None ):
+            np.random.seed(param_desc.seed)
+        logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
+
+    if 'format' not in param_desc or param_desc.format == 'cartesian':
+        if 'random' in param_desc and param_desc.random:
+            raise NotImplementedError
+        new_param_desc = param_desc
+
+    elif param_desc.format in ['polar', 'spherical']:
+
+        if 'center' in param_desc:
+            if 'centre' in param_desc:
+                raise ValueError("The parameter description defines both 'centre' and 'center'. "
+                                 "This is ambiguous as they are synonymous: remove one.")
+            param_desc.centre = param_desc.center
+        centre = OrderedDict( (name, np.array(param_desc.centre[name]))
+                               for name in param_desc.variables )
+        # The total number of variables is the sum of each variable's number of elements
+        nvars = sum( np.prod(var.shape) for var in centre.values() )
+
+        # Get the coordinate angles
+        if 'random' in param_desc and param_desc.random:
+            # All angles except last [0, π)
+            # Last angle [0, 2π)
+            angles = np.uniform(0, np.pi, nvars - 1)
+            angles[-1] = 2*angles[-1]
+        else:
+            # The angles may be given with nested structure; this is just to help
+            # legibility, so flatten everything.
+            angles = np.concatenate([np.array(a).flatten() for a in param_desc.angles])
+            if len(angles) != nvars - 1:
+                raise ValueError("Number of coordinate angles (currently {}) must be "
+                                    "one less than the number of variables. (currently {})."
+                                    .format(len(param_desc.angles), len(param_desc.variables)))
+
+        # Compute point on the unit sphere
+        sines = np.concatenate(([1], np.sin(angles)))
+        cosines = np.concatenate((np.cos(angles), [1]))
+        unit_vals_flat = np.cumprod(sines) * cosines
+        # "unflatten" the coordinates
+        unit_vals = []
+        i = 0
+        for name, val in centre.items():
+            varlen = np.prod(val.shape)
+            unit_vals.append(unit_vals_flat[i:i+varlen].reshape(val.shape))
+            i += varlen
+
+        # rescale coords
+        radii = []
+        for name, val in centre.items():
+            radius = param_desc.radii[name]
+            if shim.isscalar(radius):
+                radii.append( np.ones(val.shape) * radius )
+            else:
+                if radius.shape != val.shape:
+                    raise ValueError("The given radius has shape '{}'. It should "
+                                        "either be scalar, or of shape '{}'."
+                                        .format(radius.shape, val.shape))
+                radii.append(radius)
+        rescaled_vals = [val * radius for val, radius in zip(unit_vals, radii)]
+
+        # add the centre
+        recentred_vals = [c + r for c, r in zip(centre.values(), rescaled_vals)]
+
+        # construct the new parameter set
+        new_param_desc = ParameterSet({
+            'format': 'cartesian',
+            'random': False,
+            'variables': param_desc.variables,
+        })
+        for name, val in zip(centre.keys(), recentred_vals):
+            new_param_desc[name] = val
+
+    else:
+        raise ValueError("Unrecognized parameter format '{}'.".format(param_desc.format))
+
+    return new_param_desc
 
 def get_random_stream(seed=314):
     global rndstream, stream_seed
