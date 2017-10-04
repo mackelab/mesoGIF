@@ -3,10 +3,11 @@ from setuptools import setup
 setup(
     name='finite-size-GIF',
     version='0.1dev',
-    py_modules=['generate_input',
-                'generate_spikes',
-                'generate_activity',
-                'fsgif_model'],
+    #py_modules=['generate_input',
+    #            'generate_spikes',
+    #            'generate_activity',
+    #            'fsgif_model'],
+    packages=['fsGIF'],
     install_requires=[
         'Click',
         'simpleeval',

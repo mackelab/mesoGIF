@@ -7,7 +7,7 @@ from parameters import ParameterSet
 import sumatra.commands
 
 import mackelab.parameters
-import core
+from . import core
 
 try:
     import click

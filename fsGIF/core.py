@@ -24,7 +24,7 @@ import sinn.analyze as anlz
 from sinn.analyze.heatmap import HeatMap
 
 from parameters import ParameterSet
-import fsgif_model as gif
+from .fsgif_model import GIF_spiking
 
 # try:
 #     import matplotlib.pyplot as plt
@@ -588,11 +588,11 @@ def get_model_params(params):
     # Generate the random connectivity
     #N = np.array((500, 100)) # No. of neurons in each pop
     #p = np.array(((0.1009, 0.1689), (0.1346, 0.1371))) # Connection probs between pops
-    Γ = gif.GIF_spiking.make_connectivity(params.N, params.p)
+    Γ = GIF_spiking.make_connectivity(params.N, params.p)
 
     # Most parameters taken from Table 1, p.32
     # or the L2/3 values from Table 2, p. 55
-    model_params = gif.GIF_spiking.Parameters(
+    model_params = GIF_spiking.Parameters(
         N      = params.N,
         R      = params.R,     # Ω, membrane resistance; no value given (unit assumes I_ext in mA)
         u_rest = params.u_rest,   # mV, p. 55
