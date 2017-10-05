@@ -12,11 +12,11 @@ import sinn.optimize.gradient_descent as gd
 from sinn.histories import Series, Spiketrain
 import sinn.iotools as iotools
 
-from . import core
+from fsGIF import core
 logger = core.logger
 ############################
 # Model import
-from . import fsgif_model as gif
+from fsGIF import fsgif_model as gif
 ############################
 
 def do_gradient_descent(mgr):
@@ -172,20 +172,22 @@ def get_sgd(mgr, check_previous_runs=True):
             sgd.set_ground_truth(core.get_model_params(params.data.params.model))
 
         if init_vals is not None:
-            if init_vals.random:
+            init_vals_format = getattr(init_vals, 'format', 'cartesian')
+            init_vals_random = getattr(init_vals, 'random', False)
+            if init_vals_random:
                 if ( 'seed' in init_vals and init_vals.seed is not None ):
                     np.random.seed(init_vals.seed)
                 logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
 
-            if init_vals.format == 'prior':
+            if init_vals_format == 'prior':
                 _fitparams_lst = [ sgd.get_param(name) for name in init_vals.variables ]
                 _init_vals_dict = { p: prior_sampler(p) for p in _fitparams_lst }
 
-            elif init_vals.format == 'cartesian':
+            elif init_vals_format == 'cartesian':
                 _init_vals_dict = { sgd.get_param(pname): init_vals[pname]
                                for pname in init_vals.variables }
 
-            elif init_vals.format in ['polar', 'spherical']:
+            elif init_vals_format in ['polar', 'spherical']:
 
                 # The total number of variables is the sum of each variable's number of elements
                 curvals = OrderedDict( (varname, sgd.get_param(varname).get_value())
@@ -194,7 +196,7 @@ def get_sgd(mgr, check_previous_runs=True):
                              for var in curvals.values() )
 
                 # Get the coordinate angles
-                if init_vals.random:
+                if init_vals_random:
                     # All angles except last [0, π)
                     # Last angle [0, 2π)
                     angles = np.uniform(0, np.pi, nvars - 1)

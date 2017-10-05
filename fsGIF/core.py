@@ -24,7 +24,7 @@ import sinn.analyze as anlz
 from sinn.analyze.heatmap import HeatMap
 
 from parameters import ParameterSet
-from .fsgif_model import GIF_spiking
+from fsGIF.fsgif_model import GIF_spiking
 
 # try:
 #     import matplotlib.pyplot as plt
