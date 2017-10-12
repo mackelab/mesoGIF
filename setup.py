@@ -17,8 +17,8 @@ setup(
     dependency_links=[
         'git+ssh://git@github.com:alcrene/parameters.git',
     ],
-    entry_points='''
-        [console_scripts]
-        fsgif=main:cli
-    ''',
+    #entry_points='''
+    #    [console_scripts]
+    #    fsgif=main:cli
+    #''',
 )

@@ -619,44 +619,46 @@ class GIF_mean_field(models.Model):
                             memory_time=self.memory_time)
 
         # Histories
-        self.n = Series(self.A, 'n')
-        self.h = Series(self.A, 'h')
-        self.h_tot = Series(self.A, 'h_tot')
-        self.u = Series(self.A, 'u', shape=(self.K, self.Npops))
+        self.n = Series(self.A, 'n', use_theano=True)
+        self.h = Series(self.A, 'h', use_theano=True)
+        self.h_tot = Series(self.A, 'h_tot', use_theano=False)
+        self.u = Series(self.A, 'u', shape=(self.K, self.Npops), use_theano=True)
             # self.u[t][0] is the array of membrane potentials at time t, at lag Δt, of each population
             # TODO: Remove +1: P_λ_fn doesn't need it anymore
-        self.varθ = Series(self.u, 'varθ')
-        self.λ = Series(self.u, 'λ')
+        self.varθ = Series(self.u, 'varθ', use_theano=True)
+        self.λ = Series(self.u, 'λ', use_theano=True)
 
         # Temporary variables
-        self.nbar = Series(self.n, 'nbar')
-        self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops))
+        self.nbar = Series(self.n, 'nbar', use_theano=False)
+        self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), use_theano=False)
         #self.A_Δ.pad(1)  # +1 HACK (safety)
         #self.g = Series(self.A, 'g', shape=(self.Npops, self.Nθ,))
-        self.g = Series(self.A, 'g', shape=(self.Npops,))  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
+        self.g = Series(self.A, 'g', shape=(self.Npops,), use_theano=True)  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
 
         # Free neurons
-        self.x = Series(self.A, 'x')                                         # number of free neurons
-        self.y = Series(self.A, 'y', shape=(self.Npops, self.Npops))         # auxiliary variable for the membrane potential of free neurons (avoids convolution)
-        self.z = Series(self.x, 'z')                                         # variance function integrated over free neurons
-        self.varθfree = Series(self.A, 'varθfree', shape=(self.Npops,))  # HACK: Nθ = 1
+        self.x = Series(self.A, 'x', use_theano=True)                        # number of free neurons
+        self.y = Series(self.A, 'y', shape=(self.Npops, self.Npops),
+                        use_theano=True)  # auxiliary variable for the membrane potential of free neurons (avoids convolution)
+        self.z = Series(self.x, 'z', use_theano=True)                                         # variance function integrated over free neurons
+        self.varθfree = Series(self.A, 'varθfree', shape=(self.Npops,),
+                               use_theano=True)  # HACK: Nθ = 1
         #self.λtilde = Series(self.u, 'λtilde')
             # In pseudocode, same symbol as λtildefree
         #self.λtildefree = Series(self.A, 'λtildefree')
-        self.λfree = Series(self.A, 'λfree')
+        self.λfree = Series(self.A, 'λfree', use_theano=True)
             #TODO: Either just take λtilde in the past, or make λtilde & λfree variables
-        self.Pfree = Series(self.λfree, 'Pfree')
+        self.Pfree = Series(self.λfree, 'Pfree', use_theano=False)
 
         # Refractory neurons
-        self.m = Series(self.u, 'm', shape=(self.K, self.Npops))          # Expected no. neurons for each last-spike bin
+        self.m = Series(self.u, 'm', shape=(self.K, self.Npops), use_theano=True)          # Expected no. neurons for each last-spike bin
             # One more than v, because we need the extra spill-over bin to compute how many neurons become 'free' (Actually, same as v)
-        self.P_λ = Series(self.m, 'P_λ')
-        self.v = Series(self.m, 'v', shape=(self.K, self.Npops))
-        self.P_Λ = Series(self.Pfree, 'P_Λ')
-        self.X = Series(self.A, 'X')
-        self.Y = Series(self.X, 'Y')
-        self.Z = Series(self.X, 'Z')
-        self.W = Series(self.X, 'W')
+        self.P_λ = Series(self.m, 'P_λ', use_theano=False)
+        self.v = Series(self.m, 'v', shape=(self.K, self.Npops), use_theano=True)
+        self.P_Λ = Series(self.Pfree, 'P_Λ', use_theano=False)
+        self.X = Series(self.A, 'X', use_theano=False)
+        self.Y = Series(self.X, 'Y', use_theano=False)
+        self.Z = Series(self.X, 'Z', use_theano=False)
+        self.W = Series(self.X, 'W', use_theano=False)
 
         # HACK For propagating gradients without scan
         #      Order must be consistent with return value of symbolic_update
@@ -853,6 +855,7 @@ class GIF_mean_field(models.Model):
 
         if shim.is_theano_object(kernel.eval(0)):
             t = shim.getT().dscalar('t')
+            t.tag.test_value = 0  # Don't fail if compute_test_value == 'raise'
             kernelfn = shim.gettheano().function([t], kernel.eval(t))
         else:
             kernelfn = lambda t: kernel.eval(t)
@@ -1104,6 +1107,8 @@ class GIF_mean_field(models.Model):
                 if shim.is_theano_variable(self.f(0)):
                     # Compile a theano function for f
                     u_var = shim.getT().dscalar('u')
+                    u_var.tag.test_value = 0
+                        # Give a test value so we can run with compute_test_value == 'raise'
                     self.f = shim.gettheano().function([u_var], self.model.f(u_var))
             def __getitem__(self, α):
                 def _f(u):
@@ -1248,6 +1253,7 @@ class GIF_mean_field(models.Model):
         if shim.is_theano_variable(f(0)):
             # Compile a theano function for f
             u_var = shim.getT().dvector('u')
+            u_var.tag.test_value = self.params.u_rest.get_value()
             f = shim.gettheano().function([u_var], self.f(u_var))
 
         η = self.get_η_csts(self, self.K,
@@ -1320,6 +1326,9 @@ class GIF_mean_field(models.Model):
                 logger.info("Compiling advance function.")
                 curtidx_var = shim.getT().lscalar()
                 stopidx_var = shim.getT().lscalar()
+                curtidx_var.tag.test_value = 0
+                stopidx_var.tag.test_value = 2
+                    # Allow model to work with compute_test_value == 'raise'
                 self.remove_other_histories()  # HACK
                 self.clear_unlocked_histories()
                 self.theano_reset()
@@ -1378,7 +1387,7 @@ class GIF_mean_field(models.Model):
         for h in dellist:
             del sinn.inputs[h]
 
-    def loglikelihood(self, start, batch_size):
+    def loglikelihood(self, start, batch_size, data=None):
 
         ####################
         # Some hacks to get around current limitations
@@ -1391,6 +1400,7 @@ class GIF_mean_field(models.Model):
         startidx = self.get_t_idx(start)
         stopidx = startidx + batch_size
         N = self.params.N
+        n_full = self.n if data is None else data
 
         # Windowed test
         #windowlen = 5
@@ -1407,7 +1417,7 @@ class GIF_mean_field(models.Model):
                 statevar_updates = {}
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
-            n = shim.cast(self.n[tidx+self.n.t0idx], 'int32')
+            n = shim.cast(n_full[tidx+self.n.t0idx], 'int32')
             #n = shim.cast(self.n[tidx+self.n.t0idx-windowlen:tidx+self.n.t0idx].sum(axis=0), 'int32')
 
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
@@ -1565,7 +1575,7 @@ class GIF_mean_field(models.Model):
     def Pfree_fn(self, t):
         """p. 53, line 9"""
         tidx_λ = self.λfree.get_t_idx(t,)
-        self.λfree.compute_up_to(tidx_λ)
+        #self.λfree.compute_up_to(tidx_λ)
             # HACK: force Theano to compute up to tidx_λ first
             #       This is required because of the hack in History.compute_up_to
             #       which assumes only one update per history is required
@@ -1598,6 +1608,7 @@ class GIF_mean_field(models.Model):
         """p.53, line 17 and 35"""
         tidx_u = self.u.get_t_idx(t)
         red_factor = shim.exp(-self.u.dt/self.params.τ_m).flatten()[np.newaxis, ...]
+        # TODO: Fix for array t
         return shim.concatenate(
             ( self.params.u_r[..., np.newaxis, :],
               ((self.u[tidx_u-1][:-1] - self.params.u_rest[np.newaxis, ...]) * red_factor + self.h_tot[t][np.newaxis,...]) ),
@@ -1611,10 +1622,18 @@ class GIF_mean_field(models.Model):
     def P_λ_fn(self, t):
         """p.53, line 19"""
         tidx_λ = self.λ.get_t_idx(t)
-        self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
-        λprev = np.concatenate(
-            ( np.zeros((1,) + self.λ.shape[1:]),
-              self.λ[tidx_λ-1][:-1] )  )
+        #self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
+        if shim.isscalar(t):
+            slice_shape = (1,) + self.λ.shape[1:]
+            λprev = np.concatenate( ( np.zeros(slice_shape),
+                                      self.λ[tidx_λ-1][:-1] ),
+                                    axis=0)
+        else:
+            assert(t.ndim == 1)
+            slice_shape = (t.shape[0],) + (1,) + self.λ.shape[1:]
+            λprev = np.concatenate( ( np.zeros(slice_shape),
+                                      self.λ[tidx_λ-1][:,:-1] ),
+                                    axis=1)
         P_λ = 0.5 * (self.λ[tidx_λ][:] + λprev) * self.P_λ.dt
         return shim.switch(P_λ <= 0.01,
                            P_λ,
@@ -1652,11 +1671,21 @@ class GIF_mean_field(models.Model):
         """p.53, line 25 and 34"""
         tidx_v = self.v.get_t_idx(t)
         tidx_m = self.m.get_t_idx(t)
-        return shim.concatenate(
-            ( shim.zeros( (1,) + self.v.shape[1:], dtype=sinn.config.floatX),
-              (1 - self.P_λ[t][1:])**2 * self.v[tidx_v-1][:-1] + self.P_λ[t][1:] * self.m[tidx_m-1][:-1]
-            ),
-            axis=-2)
+        if shim.isscalar(t):
+            slice_shape = (1,) + self.v.shape[1:]
+            return shim.concatenate(
+                ( shim.zeros(slice_shape, dtype=sinn.config.floatX),
+                  (1 - self.P_λ[t][1:])**2 * self.v[tidx_v-1][:-1] + self.P_λ[t][1:] * self.m[tidx_m-1][:-1]
+                ),
+                axis=0)
+        else:
+            assert(t.ndim == 1)
+            slice_shape = t.shape + (1,) + self.v.shape[1:]
+            return shim.concatenate(
+                ( shim.zeros(slice_shape, dtype=sinn.config.floatX),
+                  (1 - self.P_λ[t][:,1:])**2 * self.v[tidx_v-1][:,:-1] + self.P_λ[t][:,1:] * self.m[tidx_m-1][:,:-1]
+                ),
+                axis=1)
 
     def m_fn(self, t):
         """p.53, line 26 and 33"""
@@ -1664,6 +1693,7 @@ class GIF_mean_field(models.Model):
         tidx_Pλ = self.P_λ.get_t_idx(t)
         tidx_n = self.n.get_t_idx(t)
         # TODO: update m_0 with n(t)
+        # TODO: fix shape if t is array
         return shim.concatenate(
             ( self.n[tidx_n-1][np.newaxis,:],
               ((1 - self.P_λ._data[tidx_Pλ][1:]) * self.m[tidx_m-1][:-1]) ),

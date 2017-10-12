@@ -75,7 +75,7 @@ if __name__ == "__main__":
     try:
         # Try to load data to see if it's already been calculated
         shist = mgr.load(spike_filename, cls=Spiketrain.from_raw)
-    except core.FileDoesNotExist:
+    except core.FileNotFound:
         generate_data = True
     except core.FileRenamed:
         # The --recalculate flag was passed and the original data file renamed

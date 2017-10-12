@@ -702,7 +702,7 @@ def subsample(hist, target_dt, max_len = None):
 
     # Remove dependencies of the subsampled data on the original
     # (this is to workaround some of sinn's intricacies)
-    sinn.inputs[newhist].clear()
+    # sinn.inputs[newhist].clear()
 
     return newhist
 
