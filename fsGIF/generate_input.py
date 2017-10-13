@@ -8,8 +8,8 @@ import operator as op
 import theano_shim as shim
 import sinn.history_functions
 
-import core
-from core import logger
+from fsGIF import core
+logger = core.logger
 
 class ParameterError(ValueError):
     pass

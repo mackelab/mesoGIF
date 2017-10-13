@@ -7,7 +7,7 @@ from parameters import ParameterSet
 import sumatra.commands
 
 import mackelab.parameters
-from . import core
+from fsGIF import core
 
 try:
     import click

@@ -5,11 +5,11 @@ import theano_shim as shim
 from sinn.histories import Series, Spiketrain
 import sinn.iotools as iotools
 
-import core
-from core import logger
+from fsGIF import core
+logger = core.logger
 ############################
 # Model import
-import fsgif_model as gif
+from fsGIF import fsgif_model as gif
 ############################
 
 def generate_activity(mgr):
@@ -50,8 +50,8 @@ if __name__ == "__main__":
     activity_filename = mgr.get_pathname(label='')
 
     try:
-        mgr.load(activity_filename, cls=Series.frow_raw)
-    except (core.FileDoesNotExist, core.FileRenamed):
+        mgr.load(activity_filename, cls=Series.from_raw)
+    except (core.FileNotFound, core.FileRenamed):
         # Get pathname with run label
         activity_filename = mgr.get_pathname(label=None)
         # Create mean-field model and generate activity

@@ -619,41 +619,41 @@ class GIF_mean_field(models.Model):
                             memory_time=self.memory_time)
 
         # Histories
-        self.n = Series(self.A, 'n', use_theano=True)
-        self.h = Series(self.A, 'h', use_theano=True)
+        self.n = Series(self.A, 'n', use_theano=shim.config.use_theano)
+        self.h = Series(self.A, 'h', use_theano=shim.config.use_theano)
         self.h_tot = Series(self.A, 'h_tot', use_theano=False)
-        self.u = Series(self.A, 'u', shape=(self.K, self.Npops), use_theano=True)
+        self.u = Series(self.A, 'u', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)
             # self.u[t][0] is the array of membrane potentials at time t, at lag Δt, of each population
             # TODO: Remove +1: P_λ_fn doesn't need it anymore
-        self.varθ = Series(self.u, 'varθ', use_theano=True)
-        self.λ = Series(self.u, 'λ', use_theano=True)
+        self.varθ = Series(self.u, 'varθ', use_theano=shim.config.use_theano)
+        self.λ = Series(self.u, 'λ', use_theano=shim.config.use_theano)
 
         # Temporary variables
         self.nbar = Series(self.n, 'nbar', use_theano=False)
         self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), use_theano=False)
         #self.A_Δ.pad(1)  # +1 HACK (safety)
         #self.g = Series(self.A, 'g', shape=(self.Npops, self.Nθ,))
-        self.g = Series(self.A, 'g', shape=(self.Npops,), use_theano=True)  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
+        self.g = Series(self.A, 'g', shape=(self.Npops,), use_theano=shim.config.use_theano)  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
 
         # Free neurons
-        self.x = Series(self.A, 'x', use_theano=True)                        # number of free neurons
+        self.x = Series(self.A, 'x', use_theano=shim.config.use_theano)                        # number of free neurons
         self.y = Series(self.A, 'y', shape=(self.Npops, self.Npops),
-                        use_theano=True)  # auxiliary variable for the membrane potential of free neurons (avoids convolution)
-        self.z = Series(self.x, 'z', use_theano=True)                                         # variance function integrated over free neurons
+                        use_theano=shim.config.use_theano)  # auxiliary variable for the membrane potential of free neurons (avoids convolution)
+        self.z = Series(self.x, 'z', use_theano=shim.config.use_theano)                                         # variance function integrated over free neurons
         self.varθfree = Series(self.A, 'varθfree', shape=(self.Npops,),
-                               use_theano=True)  # HACK: Nθ = 1
+                               use_theano=shim.config.use_theano)  # HACK: Nθ = 1
         #self.λtilde = Series(self.u, 'λtilde')
             # In pseudocode, same symbol as λtildefree
         #self.λtildefree = Series(self.A, 'λtildefree')
-        self.λfree = Series(self.A, 'λfree', use_theano=True)
+        self.λfree = Series(self.A, 'λfree', use_theano=shim.config.use_theano)
             #TODO: Either just take λtilde in the past, or make λtilde & λfree variables
         self.Pfree = Series(self.λfree, 'Pfree', use_theano=False)
 
         # Refractory neurons
-        self.m = Series(self.u, 'm', shape=(self.K, self.Npops), use_theano=True)          # Expected no. neurons for each last-spike bin
+        self.m = Series(self.u, 'm', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)          # Expected no. neurons for each last-spike bin
             # One more than v, because we need the extra spill-over bin to compute how many neurons become 'free' (Actually, same as v)
         self.P_λ = Series(self.m, 'P_λ', use_theano=False)
-        self.v = Series(self.m, 'v', shape=(self.K, self.Npops), use_theano=True)
+        self.v = Series(self.m, 'v', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)
         self.P_Λ = Series(self.Pfree, 'P_Λ', use_theano=False)
         self.X = Series(self.A, 'X', use_theano=False)
         self.Y = Series(self.X, 'Y', use_theano=False)
@@ -1009,8 +1009,9 @@ class GIF_mean_field(models.Model):
         dt = reference_hist.dt
 
         θ_dis = Series(reference_hist, 'θ_dis',
-                       t0 = dt,
-                       tn = memory_time+reference_hist.dt,
+                       time_array = np.arange(dt, memory_time+dt, dt),
+                       #t0 = dt,
+                       #tn = memory_time+reference_hist.dt,
                        iterative = False)
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(

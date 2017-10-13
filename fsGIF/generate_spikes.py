@@ -5,11 +5,11 @@ import theano_shim as shim
 from sinn.histories import Series, Spiketrain
 import sinn.iotools as iotools
 
-import core
-from core import logger
+from fsGIF import core
+logger = core.logger
 ############################
 # Model import
-import fsgif_model as gif
+from fsGIF import fsgif_model as gif
 ############################
 
 """
