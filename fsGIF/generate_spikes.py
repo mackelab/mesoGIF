@@ -49,10 +49,12 @@ def generate_spikes(mgr):
     model_params = core.get_model_params(params.model)
         # Needed for now because fsgif_model does not yet use ParameterSet
     spiking_model = gif.GIF_spiking(model_params, shist, Ihist,
-                                    params.initializer, rndstream)
-    w = gif.GIF_spiking.expand_param(np.array(model_params.w), model_params.N) * model_params.Γ
-        # w includes both w and Γ from Eq. 20
-    shist.set_connectivity(w)
+                                    params.initializer, 
+                                    set_weights=True,
+                                    random_stream=rndstream)
+    #w = gif.GIF_spiking.expand_param(np.array(model_params.w), model_params.N) * model_params.Γ
+    #    # w includes both w and Γ from Eq. 20
+    #shist.set_connectivity(w)
 
     # Generate the spikes
     shist.set()

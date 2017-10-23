@@ -108,12 +108,22 @@ class GIF_spiking(models.Model):
                                    ( 'J_θ',    (config.floatX, None, True)), # Integral of adaptation (mV s)
                                    ( 'τ_θ',    (config.floatX, None, True))
                                    ) )
+        # NOTE: `Γ` is typically obtained by calling `make_connectivity` with `N` and `p`.
     Parameters = sinn.define_parameters(Parameter_info)
     State = namedtuple('State', ['u', 't_hat'])
 
 
     def __init__(self, params, spike_history, input_history,
-                 initializer='stationary', random_stream=None, memory_time=None):
+                 initializer='stationary', set_weights=True, random_stream=None, memory_time=None):
+        """
+        Parameters
+        ----------
+        set_weights: bool, ndarray
+            (Optional) Set to True to indicate that network connectivity should be set using the 
+            `w` and `Γ` parameters. If the spike history is already filled, set to False to
+            avoid overwriting the connectivity. If an ndarray, that array will be used directly
+            to set connectivity, ignoring model parameters. Default is True.
+        """
 
         self._refhist = spike_history
         self.s = spike_history
@@ -134,6 +144,16 @@ class GIF_spiking(models.Model):
         N = self.params.N.get_value()
         assert(N.ndim == 1)
         self.Npops = len(N)
+        
+        # Set the connection weights
+        if isinstance(set_weights, np.ndarray):
+            self.s.set_connectivity(set_weights)
+        elif set_weights:
+            # TODO: If parameters were less hacky, w would already be properly
+            #       cast as an array
+            w = self.expand_param(np.array(self.params.w), self.params.N) * self.params.Γ
+                # w includes both w and Γ from Eq. 20
+            self.s.set_connectivity(w)
 
         # Model variables
         self.RI_syn = Series(self.s, 'RI_syn',
@@ -180,6 +200,7 @@ class GIF_spiking(models.Model):
         self.memory_time = max(memory_time,
                                max( kernel.memory_time
                                     for kernel in [self.ε, self.θ1, self.θ2] ) )
+        self.K = np.rint( self.memory_time / self.dt ).astype(int)
         self.s.pad(self.memory_time)
         # Pad because these are ODEs (need initial condition)
         #self.u.pad(1)
@@ -195,7 +216,8 @@ class GIF_spiking(models.Model):
             u_r = self.expand_param(self.params.u_r, self.params.N)
         )
 
-        self.init_state_vars(initializer)
+        if self.s._original_tidx.get_value() < self.s.t0idx:
+            self.init_state_vars(initializer)
 
         # # Initialize last spike time such that it was effectively "at infinity"
         # idx = self.t_hat.t0idx - 1; assert(idx >= 0)
@@ -224,12 +246,12 @@ class GIF_spiking(models.Model):
     def init_state_vars(self, initializer='stationary'):
 
         if initializer == 'stationary':
-            K = np.rint( self.memory_time / self.dt ).astype(int)
             θ_dis, θtilde_dis = GIF_mean_field.discretize_θkernel(
                 [self.θ1, self.θ2], self._refhist, self.params)
             init_A = GIF_mean_field.get_stationary_activity(
-                self, K, θ_dis, θtilde_dis)
+                self, self.K, θ_dis, θtilde_dis)
             init_state = self.get_stationary_state(init_A)
+
         elif initializer == 'silent':
             init_A = np.zeros((len(self.s.pop_slices),))
             init_state = self.get_silent_state()
@@ -556,11 +578,15 @@ class GIF_mean_field(models.Model):
     Parameter_info = GIF_spiking.Parameter_info
     Parameters = sinn.define_parameters(Parameter_info)
 
-    # 'State' is an irreducible set of variables which uniquely define the model's state
-    State = namedtuple('State',
+    # 'State' is an irreducible set of variables which uniquely define the model's state.
+    # It is subdivided into latent and observed variables.
+    LatentState = namedtuple('LatentState',
                        ['h', 'u',
                         'λ', 'λfree',
                         'g', 'm', 'v', 'x', 'y', 'z'])
+    ObservedState = namedtuple('ObservedState',
+                               ['A'])
+    State = namedtuple('State', ObservedState._fields + LatentState._fields)
         # TODO: Some way of specifying how much memory is needed for each variable
         #       Or get this directly from the update functions, by some kind of introspection ?
     # HACK For propagating gradients without scan
@@ -662,13 +688,18 @@ class GIF_mean_field(models.Model):
 
         # HACK For propagating gradients without scan
         #      Order must be consistent with return value of symbolic_update
-        self.statehists = [ getattr(self, varname) for varname in self.State._fields ]
+        # TODO: Use State rather than LatentState, so we don't need to add the A manually
+        self.statehists = [ getattr(self, varname) for varname in self.LatentState._fields ]
+
+        self.init_kernels()
 
         # Initialize the variables
-        self.init_state_vars(initializer)
-        # self.θtilde                                                     # QR kernel, computed from θ
-        # self.θhat                                                       # convolution of θtilde with n up to t_n (for t_n > t - self.K)
+        if self.A._original_tidx.get_value() < self.A.t0idx:
+            self.init_observed_vars(initializer)
+        self.init_latent_vars()
 
+        self.set_refractory_mask()
+            # FIXME: Make dependence on t_ref symbolic - at present can't update t_ref
 
         #####################################################
         # Create the loglikelihood function
@@ -869,26 +900,13 @@ class GIF_mean_field(models.Model):
         K = self.index_interval(T)
         return T, K
 
-    def init_state_vars(self, initializer='stationary'):
-        """
-        Originally based on InitPopulations (p. 52)
-
-        Parameters
-        ----------
-        initializer: str
-            One of
-              - 'stationary': (Default) Stationary state under no input conditions.
-              - 'silent': The last firing time of each neuron is set to -∞. Very artificial
-                condition, that may require a long burnin time to remove the transient.
-
-        TODO: Call this every time the model is updated
-        """
-        # FIXME: Initialize series' to 0
-
+    def init_kernels(self):
         if not hasattr(self, 'θ_dis'):
             assert(not hasattr(self, 'θtilde_dis'))
             self.θ_dis, self.θtilde_dis = self.discretize_θkernel(
                 [self.θ1, self.θ2], self.A, self.params)
+            self.θtilde_dis.add_inputs([self.θ_dis])
+
         else:
             assert(hasattr(self, 'θtilde_dis'))
 
@@ -905,17 +923,54 @@ class GIF_mean_field(models.Model):
         self.θtilde_dis.locked = True
         # <<<<<
 
-        # ====================
-        # Initialize state variables
+
+    def init_observed_vars(self, initializer='stationary'):
+        """
+        Originally based on InitPopulations (p. 52)
+
+        Parameters
+        ----------
+        initializer: str
+            One of
+              - 'stationary': (Default) Stationary state under no input conditions.
+              - 'silent': The last firing time of each neuron is set to -∞. Very artificial
+                condition, that may require a long burnin time to remove the transient.
+
+        TODO: Call this every time the model is updated
+        """
+        # TODO: Use generic LatentState._fields; use 'get_stationary_observed'
 
         if initializer == 'stationary':
             init_A = self.get_stationary_activity(self, self.K, self.θ_dis, self.θtilde_dis)
-            init_state = self.get_stationary_state(init_A)
         elif initializer == 'silent':
             init_A = np.zeros(self.A.shape)
+        else:
+            raise ValueError("Initializer string must be one of 'stationary', 'silent'")
+
+        data = self.A._data.get_value(borrow=True)
+        data[:self.A.t0idx,:] = init_A
+        self.A._data.set_value(data, borrow=True)
+
+    def init_latent_vars(self, initializer='stationary'):
+
+        # FIXME: Initialize series' to 0
+
+        for varname in self.ObservedState._fields:
+            hist = getattr(self, varname)
+            if hist._original_tidx.get_value() < hist.t0idx - 1:
+                raise RuntimeError("You must initialize the observed histories before the latents.")
+
+        # ====================
+        # Initialize state variables
+        if initializer == 'stationary':
+            init_A = self.get_stationary_activity(self, self.K, self.θ_dis, self.θtilde_dis)
+            init_state = self.get_stationary_state(init_A)
+                # TODO: Rename to 'get_stationary_latents'
+        elif initializer == 'silent':
             init_state = self.get_silent_state()
         else:
             raise ValueError("Initializer string must be one of 'stationary', 'silent'")
+
 
         # Set initial values (make sure this is done after all padding is added)
 
@@ -926,7 +981,7 @@ class GIF_mean_field(models.Model):
         # mdata[0, -1, :] = self.params.N
         # self.m._data.set_value(mdata, borrow=True)
 
-        for varname in self.State._fields:
+        for varname in self.LatentState._fields:
             hist = getattr(self, varname)
             initval = getattr(init_state, varname)
             hist.pad(1)  # Ensure we have at least one bin for the initial value
@@ -936,10 +991,6 @@ class GIF_mean_field(models.Model):
             data[idx,:] = initval
             hist._data.set_value(data, borrow=True)
 
-        # TODO: Make A a state variable and just use the above code
-        data = self.A._data.get_value(borrow=True)
-        data[:self.A.t0idx,:] = init_A
-        self.A._data.set_value(data, borrow=True)
 
         # # Make all neurons free neurons
         # idx = self.x.t0idx - 1; assert(idx >= 0)
@@ -962,6 +1013,7 @@ class GIF_mean_field(models.Model):
         #self.g_l.set_value( np.zeros((self.Npops, self.Nθ)) )
         #self.y.set_value( np.zeros((self.Npops, self.Npops)) )
 
+    def set_refractory_mask(self):
         # =============================
         # Set the refractory mask
 
@@ -978,13 +1030,6 @@ class GIF_mean_field(models.Model):
                     self.ref_mask[l, α] = 0
                 else:
                     break
-
-    # # FIXME: This is only required because of our abuse of shared variable
-    # # updates
-    # def advance(self, stop):
-    #     stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
-    #     for i in range(self.nbar._original_tidx.get_value() + 1, stopidx):
-    #         self._advance_fn(i)
 
     @staticmethod
     def discretize_θkernel(θ, reference_hist, params):
@@ -1029,7 +1074,7 @@ class GIF_mean_field(models.Model):
                 del shim.config.theano_updates[θ_dis._original_tidx]
 
         # TODO: Use operations
-        θtilde_dis = Series(θ_dis, 'θtilde_dis')
+        θtilde_dis = Series(θ_dis, 'θtilde_dis', iterative=False)
         # HACK Proper way to ensure this would be to specify no. of bins (instead of tn) to history constructor
         if len(θ_dis) != len(θtilde_dis):
             θtilde_dis._tarr = copy.copy(θ_dis._tarr)
@@ -1044,7 +1089,7 @@ class GIF_mean_field(models.Model):
         θtilde_dis.set_update_function(θtilde_upd_fn)
         # self.θtilde_dis.set_update_function(
         #     lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis._data[t]/self.params.Δu) ) / self.params.N )
-        θtilde_dis.add_inputs([θ_dis])
+
         # HACK Currently we only support updating by one histories timestep
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
@@ -1259,7 +1304,7 @@ class GIF_mean_field(models.Model):
 
         η = self.get_η_csts(self, self.K,
                             self.θ_dis, self.θtilde_dis)
-        state = self.State(
+        state = self.LatentState(
             h = self.params.u_rest.get_value() + η[0].dot(Astar),
             u = η[2] + η[9].dot(Astar),
             λ = np.stack(
@@ -1781,7 +1826,7 @@ class GIF_mean_field(models.Model):
         # y0 = statevars[8]
         # z0 = statevars[9]
 
-        curstate = self.State(*statevars)
+        curstate = self.LatentState(*statevars)
 
         λfree0 = curstate.λfree
         λ0 = curstate.λ
@@ -1900,7 +1945,7 @@ class GIF_mean_field(models.Model):
         # nbar
         nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
 
-        newstate = self.State(
+        newstate = self.LatentState(
             h = ht,
             u = ut,
             λ = λt,
@@ -1914,16 +1959,16 @@ class GIF_mean_field(models.Model):
             )
 
         updates = OrderedDict( (getattr(curstate, key), getattr(newstate, key))
-                               for key in self.State._fields )
+                               for key in self.LatentState._fields )
 
         # TODO: use the key string itself
         input_vars = OrderedDict( (getattr(self, key), getattr(curstate, key))
-                                  for key in self.State._fields )
+                                  for key in self.LatentState._fields )
 
         # Output variables contain updates to the state variables, as well as
         # whatever other quantities we want to compute
         output_vars = OrderedDict( (getattr(self, key), getattr(newstate, key))
-                                   for key in self.State._fields )
+                                   for key in self.LatentState._fields )
         output_vars[self.nbar] = nbar
 
         # updates = OrderedDict((

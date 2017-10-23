@@ -623,7 +623,7 @@ def construct_model(model_module, model_params, data_history, input_history, ini
     Parameters
     ----------
     model_module: module
-        Models are defined in .py files and imported. This is the imported module instance.
+        Models are defined in .py files and imported. This is the imported module.
     model_params: ParameterSet
         Parameter set defining the model. Must minimally contain:
            - 'type': Class name in `model_module`. Selects which model will be created.
