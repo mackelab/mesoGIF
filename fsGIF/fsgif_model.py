@@ -1444,7 +1444,7 @@ class GIF_mean_field(models.Model):
         #####################
 
         startidx = self.get_t_idx(start)
-        stopidx = startidx + batch_size
+        stopidx = startidx + self.index_interval(batch_size)
         N = self.params.N
         n_full = self.n if data is None else data
 
