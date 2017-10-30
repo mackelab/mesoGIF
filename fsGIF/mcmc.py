@@ -1,6 +1,6 @@
 import numpy as np
 import pymc3 as pymc
-
+from mackelab.pymc3 import PyMCPrior, export_multitrace
 
 from parameters import ParameterSet
 import theano_shim as shim
@@ -42,7 +42,9 @@ class nDist(pymc.distributions.Continuous):
     def _repr_latex_(self, name=None, dist=None):
         if dist is None:
             dist = self
-        return r"${} \sim \text{fsGIF}(…)$".format(name)
+        if name is None:
+            name = "n"
+        return r"${} \sim \text{{fsGIF}}(…)$".format(name)
 
 def run_mcmc(mgr, model):
 
@@ -62,18 +64,18 @@ def run_mcmc(mgr, model):
                 del masks[varname]
             else:
                 priorparams[varname].mask = mask
-        
+
     modelvars = [getattr(model.params, varname) for varname in varnames]
 
     with pymc.Model() as pymc_model:
-        priors = core.PyMCPrior(priorparams, modelvars)
+        priors = PyMCPrior(priorparams, modelvars)
         ndata = model.n._data.get_value()   # temp: nDist should be generic Dist
         n = nDist('n', mgr.params.posterior.burnin, mgr.params.posterior.datalen,
                   model = model,
                   variables = {getattr(model.params, varname) : prior
-                               for varname, prior in priors.items()}, 
+                               for varname, prior in priors.items()},
                   observed = ndata)
-            
+
         trace = pymc.sample(**mgr.params.sampler)
 
     return trace
@@ -117,6 +119,6 @@ if __name__ == "__main__":
     trace = run_mcmc(mgr, model)
 
     mcmc_filename = mgr.get_pathname(label=None)
-    iotools.save(mcmc_filename, {'model': model, 'trace': trace})
+    iotools.save(mcmc_filename, export_multitrace(trace))
 
 
