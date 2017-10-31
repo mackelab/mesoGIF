@@ -119,6 +119,6 @@ if __name__ == "__main__":
     trace = run_mcmc(mgr, model)
 
     mcmc_filename = mgr.get_pathname(label=None)
-    iotools.save(mcmc_filename, export_multitrace(trace))
+    iotools.save(mcmc_filename, export_multitrace(trace), format='plain')
 
 

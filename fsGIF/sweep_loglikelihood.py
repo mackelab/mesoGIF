@@ -50,10 +50,10 @@ def sweep_loglikelihood(model, calc_params, output_filename):
     param_sweep.add_param(param1.name, idx=param1.idx, axis_stops=param1_stops)
     param_sweep.add_param(param2.name, idx=param2.idx, axis_stops=param2_stops)
 
-    if type(calc_params.burnin) != type(calc_params.datalen):
+    if type(calc_params.posterior.burnin) != type(calc_params.posterior.datalen):
         raise ValueError("The 'burnin' and 'datalen' parameters must be of the same type.")
-    burnin_idx = model.get_t_idx(calc_params.burnin, allow_rounding=True)
-    stop_idx = model.get_t_idx(calc_params.burnin+calc_params.datalen, allow_rounding=True)
+    burnin_idx = model.get_t_idx(calc_params.posterior.burnin, allow_rounding=True)
+    stop_idx = model.get_t_idx(calc_params.posterior.burnin+calc_params.posterior.datalen, allow_rounding=True)
 
     if shim.config.use_theano:
         model.theano_reset()
@@ -73,7 +73,7 @@ def sweep_loglikelihood(model, calc_params, output_filename):
         def logL_fn_wrapper(model):
             model.clear_unlocked_histories()
             logger.info("Computing state variable traces...")
-            model.init_state_vars(params.model.initializer)
+            model.init_latent_vars(calc_params.posterior.model.initializer)
             model.advance(burnin_idx)
             logger.info("Computing log likelihood...")
             return logL_fn(burnin_idx)
@@ -132,60 +132,61 @@ if __name__ == "__main__":
                             help="Indicate to run in debug mode: disables checking for "
                             "precomputed data and does not save the result.")
     mgr.load_parameters()
-    params = mgr.params
+    posparams = mgr.params.posterior
+    sweepparams = mgr.params
 
     #output_filename = core.get_pathname(core.likelihood_subdir, params)
     #data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
     logL_filename = mgr.get_pathname(label='')
-    data_filename = mgr.get_pathname(params=params.data.params,
-                                     subdir=params.data.dir,
-                                     suffix=params.data.name,
+    data_filename = mgr.get_pathname(params=posparams.data.params,
+                                     subdir=posparams.data.dir,
+                                     suffix=posparams.data.name,
                                      label='')
-    input_filename = mgr.get_pathname(params=params.input.params,
-                                      subdir=params.input.dir,
-                                      suffix=params.input.name,
+    input_filename = mgr.get_pathname(params=posparams.input.params,
+                                      subdir=posparams.input.dir,
+                                      suffix=posparams.input.name,
                                       label='')
     try:
         if mgr.args.debug:
             # Don't try to load previous data if debugging
-            raise core.FileDoesNotExist
+            raise core.FileNotFound
         mgr.load(logL_filename)
-    except (core.FileDoesNotExist, core.FileRenamed):
+    except (core.FileNotFound, core.FileRenamed):
 
         data = mgr.load(data_filename,
-                        cls=getattr(histories, params.data.type).from_raw,
+                        cls=getattr(histories, posparams.data.type).from_raw,
                         calc='activity',
                         recalculate=False)
-        data = core.subsample(data, mgr.params.model.dt)
+        data = core.subsample(data, posparams.model.dt)
         data.lock()
 
         #input_filename = core.get_pathname(params.input.dir, params.input.params, params.input.name)
         #input_history = getattr(histories, params.input.type).from_raw(
         #    iotools.loadraw(input_filename))
         input_history = mgr.load(input_filename,
-                                 cls=getattr(histories, params.input.type).from_raw,
+                                 cls=getattr(histories, posparams.input.type).from_raw,
                                  calc='input',
                                  recalculate=False)
-        input_history = core.subsample(input_history, mgr.params.model.dt)
+        input_history = core.subsample(input_history, posparams.model.dt)
         input_history.lock()
 
-        model_params = core.get_model_params(params.model.params)
-        model = getattr(gif, params.model.type)(model_params,
+        model_params = core.get_model_params(posparams.model.params)
+        model = getattr(gif, posparams.model.type)(model_params,
                                                 data,
                                                 input_history,
-                                                initializer=params.model.initializer)
+                                                initializer=posparams.model.initializer)
 
         # Get output filename with run label
         logL_filename = mgr.get_pathname(label=None)
 
         # Compute log likelihood
-        logL = sweep_loglikelihood(model, params, logL_filename)
+        logL = sweep_loglikelihood(model, sweepparams, logL_filename)
 
 
         if debug:
             print("Obtained logL: ", logL[0][-1])
 
-            theanostr = '_theano' if params.theano else '_numpy'
+            theanostr = '_theano' if sweepparams.theano else '_numpy'
             iotools.save('logL_debug' + theanostr, logL[0],
                          overwrite=True)
 
