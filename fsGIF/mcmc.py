@@ -1,6 +1,7 @@
 import numpy as np
 import pymc3 as pymc
 from mackelab.pymc3 import PyMCPrior, export_multitrace
+from mackelab.parameters import Transform
 
 from parameters import ParameterSet
 import theano_shim as shim
@@ -21,6 +22,8 @@ shim.load_theano()
 shim.gettheano().config.compute_test_value = 'raise'
 sinn.config.floatX = 'float64'
 shim.gettheano().config.floatX = sinn.config.floatX
+
+Transform.namespaces.update({'shim': shim})
 
 class nDist(pymc.distributions.Continuous):
 

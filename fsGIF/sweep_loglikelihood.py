@@ -183,7 +183,7 @@ if __name__ == "__main__":
         logL = sweep_loglikelihood(model, sweepparams, logL_filename)
 
 
-        if debug:
+        if mgr.args.debug:
             print("Obtained logL: ", logL[0][-1])
 
             theanostr = '_theano' if sweepparams.theano else '_numpy'
