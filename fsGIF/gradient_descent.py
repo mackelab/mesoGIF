@@ -170,7 +170,7 @@ def get_sgd(mgr, check_previous_runs=True):
         #                        'τ -> shim.log10(τ)', 'logτ -> 10**logτ' )
 
         sgd.verify_transforms(trust_automatically=True)
-            # FIXME: Use simple eval, and then this whole verification thing won't be needed
+            # FIXME: Use TransformedVar, and then this whole verification thing won't be needed
 
         # If the parameters which generated the data are known, set them as ground truth
         if ( 'params' in params.data and isinstance(params.data, ParameterSet)
@@ -187,12 +187,19 @@ def get_sgd(mgr, check_previous_runs=True):
                 logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
 
             if init_vals_format == 'prior':
-                _fitparams_lst = [ sgd.get_param(name) for name in params.variables ]
-                _init_vals_dict = { p: prior_sampler(p) for p in _fitparams_lst }
+                _init_vals_dict = {}
+                # TODO: Checking for substitutions would be cleaner if using TransformedVar
+                for name in params.variables:
+                    var = sgd.get_param(name)
+                    if var in sgd.substitutions:
+                        _init_var = sgd.substitutions[var][0]
+                        _init_vals_dict[_init_var] = prior_sampler(var)
+                    else:
+                        _init_vals_dict[var] = prior_sampler(var)
 
             elif init_vals_format == 'cartesian':
                 _init_vals_dict = { sgd.get_param(pname): init_vals[pname]
-                               for pname in init_vals.variables }
+                                    for pname in init_vals.variables }
 
             elif init_vals_format in ['polar', 'spherical']:
 
