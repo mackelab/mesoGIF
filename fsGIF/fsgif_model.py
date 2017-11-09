@@ -119,7 +119,7 @@ class GIF_spiking(models.Model):
         Parameters
         ----------
         set_weights: bool, ndarray
-            (Optional) Set to True to indicate that network connectivity should be set using the 
+            (Optional) Set to True to indicate that network connectivity should be set using the
             `w` and `Γ` parameters. If the spike history is already filled, set to False to
             avoid overwriting the connectivity. If an ndarray, that array will be used directly
             to set connectivity, ignoring model parameters. Default is True.
@@ -144,7 +144,7 @@ class GIF_spiking(models.Model):
         N = self.params.N.get_value()
         assert(N.ndim == 1)
         self.Npops = len(N)
-        
+
         # Set the connection weights
         if isinstance(set_weights, np.ndarray):
             self.s.set_connectivity(set_weights)

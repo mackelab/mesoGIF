@@ -22,6 +22,8 @@ import simpleeval
 import ast
 import operator
 
+import mackelab as ml
+import mackelab.iotools
 import theano_shim as shim
 import sinn
 import sinn.iotools as iotools
@@ -261,7 +263,7 @@ class RunMgr:
 
     @staticmethod
     def rename_to_free_file(path):
-        new_f, new_path = iotools._get_free_file(path)
+        new_f, new_path = ml.iotools.get_free_file(path)
         new_f.close()
         os.rename(path, new_path)
         return new_path
