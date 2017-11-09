@@ -74,13 +74,14 @@ def load_latest(mgr, pathname):
     return mgr.load(latest), latest
 
 def get_sgd(mgr, check_previous_runs=True):
-    params = mgr.params
+    params = mgr.params.posterior
+    prior_descs = mgr.params.posterior.model.prior
 
-    if 'init_vals' not in params or params.init_vals is None:
+    if 'init_vals' not in mgr.params or mgr.params.init_vals is None:
         init_vals = None
     else:
         # TODO: check if init_vals is a list
-        init_vals = params.init_vals
+        init_vals = mgr.params.init_vals
 
     #output_filename = core.get_pathname(core.likelihood_subdir, params)
     #data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
@@ -119,14 +120,14 @@ def get_sgd(mgr, check_previous_runs=True):
                     cls=getattr(histories, params.data.type).from_raw,
                     calc='activity',
                     recalculate=False)
-    data_history = core.subsample(data_history, mgr.params.model.dt)
+    data_history = core.subsample(data_history, params.model.dt)
     data_history.lock()
 
     input_history = mgr.load(input_filename,
                              cls=getattr(histories, params.input.type).from_raw,
                              calc='input',
                              recalculate=False)
-    input_history = core.subsample(input_history, mgr.params.model.dt)
+    input_history = core.subsample(input_history, params.model.dt)
     input_history.lock()
 
     prior_sampler = core.get_sampler(params.model.prior)
@@ -134,23 +135,29 @@ def get_sgd(mgr, check_previous_runs=True):
     model = core.construct_model(gif, params.model, data_history, input_history,
                                  initializer=params.model.initializer)
 
-    fitmask = get_fitmask(model, mgr.params)
+    fitmask = get_fitmask(model, params.mask)
 
     if new_run:
         # For a new run, a new sgd instance must be created and initialized
 
         sgd = gd.SGD(
             cost = model.loglikelihood,
-            optimizer = params.optimizer,
+            optimizer = mgr.params.optimizer,
             model = model,
-            start = params.start,
-            datalen = params.datalen,
-            burnin = params.burnin,
-            mbatch_size = params.batch_size
+            start = mgr.params.start,
+            datalen = mgr.params.datalen,
+            burnin = mgr.params.burnin,
+            mbatch_size = mgr.params.batch_size
         )
         sgd.set_fitparams(fitmask)
 
-        for transform_desc in params.transforms:
+        transform_descs = [desc.transform for desc in prior_descs.values() if hasattr(desc, 'transform')]
+        # TODO: Change SGD to use the TransformedVar class, than remove the following
+        transforms = []
+        for desc in transform_descs:
+            origname, newname = desc.name.split('->')
+            transforms.append([origname.strip(), newname.strip(), desc.to, desc.back])
+        for transform_desc in transforms:
             try:
                 var = sgd.get_param(transform_desc[0])
             except KeyError:
@@ -180,7 +187,7 @@ def get_sgd(mgr, check_previous_runs=True):
                 logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
 
             if init_vals_format == 'prior':
-                _fitparams_lst = [ sgd.get_param(name) for name in init_vals.variables ]
+                _fitparams_lst = [ sgd.get_param(name) for name in params.variables ]
                 _init_vals_dict = { p: prior_sampler(p) for p in _fitparams_lst }
 
             elif init_vals_format == 'cartesian':
@@ -273,7 +280,7 @@ def get_sgd(mgr, check_previous_runs=True):
         # Create the SGD from the loaded raw data
         sgd = gd.SGD(
             cost = model.loglikelihood,
-            optimizer = params.optimizer,
+            optimizer = mgr.params.optimizer,
             model = model,
             sgd_file = sgdraw,
             set_params = False  # Have to call verify_transforms first
@@ -287,8 +294,8 @@ def get_sgd(mgr, check_previous_runs=True):
 
     return sgd
 
-def get_fitmask(model, fit_params):
-    return { getattr(model.params, name) : mask for name, mask in fit_params.fitmask.items() }
+def get_fitmask(model, mask_desc):
+    return { getattr(model.params, name) : mask for name, mask in mask_desc.items() }
 
 def get_param_hierarchy(params):
     """
@@ -303,9 +310,9 @@ def get_param_hierarchy(params):
     del sgd_params['init_vals']
     # Dataset parameters
     data_keys = ['data', 'input', 'model']
-    data_params = ParameterSet({key: sgd_params[key] for key in data_keys})
+    data_params = ParameterSet({key: sgd_params.posterior[key] for key in data_keys})
     for key in data_keys:
-        del sgd_params[key]
+        del sgd_params.posterior[key]
 
     return [data_params, sgd_params, init_params]
 

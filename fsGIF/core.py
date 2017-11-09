@@ -562,12 +562,12 @@ def get_sampler(dists):
         factor = distparams.factor if 'factor' in distparams else 1
 
         if distparams.dist == 'normal':
-            return factor * np.random.normal(distparams.params.loc,
-                                    distparams.params.scale, size=shape)
+            return factor * np.random.normal(distparams.loc,
+                                             distparams.scale, size=shape)
         elif distparams.dist == 'expnormal':
             return factor * np.exp(
-                np.random.normal(distparams.params.loc,
-                                 distparams.params.scale, size=shape) )
+                np.random.normal(distparams.loc,
+                                 distparams.scale, size=shape) )
         elif distparams.dist == 'mixed':
             comps = distparams.components
             distlist = [distparams[comp] for comp in comps]
