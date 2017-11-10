@@ -566,6 +566,9 @@ def get_sampler(dists):
         if distparams.dist == 'normal':
             return factor * np.random.normal(distparams.loc,
                                              distparams.scale, size=shape)
+        elif distparams.dist == 'exponential':
+            return factor * np.random.exponential(distparams.scale,
+                                                  size=shape)
         elif distparams.dist == 'expnormal':
             return factor * np.exp(
                 np.random.normal(distparams.loc,
