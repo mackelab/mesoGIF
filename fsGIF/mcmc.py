@@ -37,6 +37,20 @@ class nDist(pymc.distributions.Continuous):
         self.start = start
         self.batch_size = batch_size
         self.variables = variables
+        # Basic checks on the variables
+        # This catches some errors allows us to exit with a more friendly
+        # error message than the one Theano would otherwise print
+        shape_mismatch = [(key,val) for key, val in variables.items()
+                          if key.broadcastable != val.broadcastable]
+        if len(shape_mismatch) > 0:
+            # TODO: Custom error type: ParameterError ?
+            # TODO: Print name (e.g. 'row', 'column') instead of broadcast pattern when possible
+            msg = "The following random variables don't match their shape in the model:"
+            msg += "\n  (var): (model broadcast pattern) vs (random variable broadcast pattern)\n"
+            msg += '\n'.join(["  - {}: {} vs {}"
+                              .format(key.name, key.broadcastable, val.broadcastable)
+                              for key, val in shape_mismatch])
+            raise ValueError(msg)
 
     def logp(self, n):
         model_graph = self.model.loglikelihood(self.start, self.batch_size, n)[0]
