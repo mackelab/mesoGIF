@@ -865,8 +865,8 @@ class GIF_mean_field(models.Model):
             return t
         else:
             return self.A.get_t_idx(t, allow_rounding) - self.A.t0idx
-    def index_interval(self, Δt):
-        return self.A.index_interval(Δt)
+    def index_interval(self, Δt, allow_rounding=False):
+        return self.A.index_interval(Δt, allow_rounding)
 
 
     def get_memory_time(self, kernel, max_time=10):
