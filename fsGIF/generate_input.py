@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
     try:
         mgr.load(pathname)
-    except (core.FileDoesNotExist, core.FileRenamed):
+    except (core.FileNotFound, core.FileRenamed):
         # Get pathname with run label
         pathname = mgr.get_pathname(label=None)
         # Generate input
