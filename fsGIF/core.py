@@ -566,13 +566,16 @@ def get_sampler(dists):
         if distparams.dist == 'normal':
             return factor * np.random.normal(distparams.loc,
                                              distparams.scale, size=shape)
-        elif distparams.dist in ['exponential', 'exp']:
-            return factor * np.random.exponential(distparams.scale,
-                                                  size=shape)
         elif distparams.dist == 'expnormal':
             return factor * np.exp(
                 np.random.normal(distparams.loc,
                                  distparams.scale, size=shape) )
+        elif distparams.dist in ['exponential', 'exp']:
+            return factor * np.random.exponential(distparams.scale,
+                                                  size=shape)
+        elif distparams.dist == 'gamma':
+            return factor * np.random.gamma(shape=distparams.a, scale=distparams.scale,
+                                            size=distparams.shape)
         elif distparams.dist == 'mixed':
             comps = distparams.components
             distlist = [distparams[comp] for comp in comps]
