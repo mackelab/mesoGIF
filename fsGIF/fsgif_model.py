@@ -103,7 +103,7 @@ class GIF_spiking(models.Model):
                                    ( 'c',      config.floatX  ),   # escape rate at threshold (Hz)
                                    ( 'Δu',     config.floatX  ),    # noise level (mV)
                                    ( 'Δ',      (config.floatX, None, True)), # transmission delay (s) (kernel ε)
-                                   ( 'τ_s',    (config.floatX, None, True)), # synaptic time constant (mV) (kernel ε)
+                                   ( 'τ_s',    (config.floatX, None, False)), # synaptic time constant (mV) (kernel ε)
                                    # Adaptation parameters (θ-kernel dependent)
                                    ( 'J_θ',    (config.floatX, None, True)), # Integral of adaptation (mV s)
                                    ( 'τ_θ',    (config.floatX, None, True))
