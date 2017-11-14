@@ -176,7 +176,8 @@ def get_sgd(mgr, check_previous_runs=True):
         if ( 'params' in params.data and isinstance(params.data, ParameterSet)
              and 'model' in params.data.params
              and isinstance(params.data.params, ParameterSet) ):
-            sgd.set_ground_truth(core.get_model_params(params.data.params.model))
+            sgd.set_ground_truth(core.get_model_params(params.data.params.model,
+                                                       params.model.type))
 
         if init_vals is not None:
             init_vals_format = getattr(init_vals, 'format', 'cartesian')

@@ -575,7 +575,8 @@ def pop_div(pop_slices, neuron_term, divisor):
 
 
 class GIF_mean_field(models.Model):
-    Parameter_info = GIF_spiking.Parameter_info
+    Parameter_info = GIF_spiking.Parameter_info.copy()
+    del Parameter_info['Γ']   # Remove the connectivity matrix
     Parameters = sinn.define_parameters(Parameter_info)
 
     # 'State' is an irreducible set of variables which uniquely define the model's state.

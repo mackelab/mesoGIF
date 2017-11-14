@@ -593,7 +593,7 @@ def get_sampler(dists):
 
     return sampler
 
-def get_model_params(params):
+def get_model_params(params, model_type):
     """Convert a ParameterSet to the internal parameter type used by models.
     Will become deprecated when models use ParameterSet."""
 
@@ -601,7 +601,12 @@ def get_model_params(params):
     # Generate the random connectivity
     #N = np.array((500, 100)) # No. of neurons in each pop
     #p = np.array(((0.1009, 0.1689), (0.1346, 0.1371))) # Connection probs between pops
-    Γ = GIF_spiking.make_connectivity(params.N, params.p)
+    if model_type == 'GIF_spiking':
+        Γ = GIF_spiking.make_connectivity(params.N, params.p)
+    elif model_type == 'GIF_mean_field':
+        Γ = None
+    else:
+        raise ValueError("Unrecognized model type '{}'.".format(model_type))
 
     # Most parameters taken from Table 1, p.32
     # or the L2/3 values from Table 2, p. 55
@@ -613,7 +618,6 @@ def get_model_params(params):
         w      = params.w,    # mV, p. 55, L2/3
         Γ      = Γ,               # Binary connectivity matrix
         τ_m    = params.τ_m,    # s,  membrane time constant
-        #τ_m    = (0.02, 0.003),    # DEBUG
         t_ref  = params.t_ref,  # s,  absolute refractory period
         u_th   = params.u_th,        # mV, non-adapting threshold  (p.54)
         u_r    = params.u_r,          # mV, reset potential   (p. 54)
@@ -624,8 +628,7 @@ def get_model_params(params):
                                   # Exc: 3 ms, Inh: 6 ms
         # Adaptation parameters   (p.55)
         J_θ    = params.J_θ,        # Integral of adaptation kernel θ (mV s)
-        τ_θ    = params.τ_θ
-        #τ_θ    = (1.0, 0.001)     # Adaptation time constant (s); Inhibitory part is undefined
+        τ_θ    = params.τ_θ       # Adaptation time constant (s); Inhibitory part is undefined
                                   # since strength is zero; we just set a value != 0 to avoid dividing by 0
     )
 
@@ -651,7 +654,7 @@ def construct_model(model_module, model_params, data_history, input_history, ini
         initializer.
         By default the value of `model_params.initializer` is used.
     """
-    module_params = get_model_params(model_params.params)
+    module_params = get_model_params(model_params.params, model_params.type)
     return getattr(model_module, model_params.type)(
         module_params,
         data_history,
