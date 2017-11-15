@@ -67,6 +67,8 @@ def run_mcmc(mgr, model):
 
     varnames = getattr(mgr.params.posterior, 'variables',
                        list(mgr.params.posterior.mask.keys()))
+    varnames = list(varnames)
+        # Easier to dynamically remove elements from a list than an array
     masks = getattr(mgr.params.posterior, 'mask', {})
     priorparams = mgr.params.posterior.model.prior
     priorparams = ParameterSet(
@@ -79,6 +81,7 @@ def run_mcmc(mgr, model):
             if not np.any(mask):
                 varnames.remove(varname)
                 del masks[varname]
+                del priorparams[varname]
             else:
                 priorparams[varname].mask = mask
 
