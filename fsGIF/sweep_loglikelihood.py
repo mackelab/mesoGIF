@@ -170,7 +170,7 @@ if __name__ == "__main__":
         input_history = core.subsample(input_history, posparams.model.dt)
         input_history.lock()
 
-        model_params = core.get_model_params(posparams.model.params)
+        model_params = core.get_model_params(posparams.model.params, 'GIF_mean_field')
         model = getattr(gif, posparams.model.type)(model_params,
                                                 data,
                                                 input_history,
