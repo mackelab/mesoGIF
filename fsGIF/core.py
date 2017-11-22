@@ -18,12 +18,9 @@ import collections
 from collections import namedtuple, OrderedDict, Iterable
 import pymc3 as pymc
 
-import simpleeval
-import ast
-import operator
-
 import mackelab as ml
 import mackelab.iotools
+import mackelab.parameters
 import theano_shim as shim
 import sinn
 import sinn.iotools as iotools
@@ -187,32 +184,34 @@ class RunMgr:
     def get_filename(self, params=None, suffix=None):
         if params is None:
             params = self.params
-        return self._get_filename(params, suffix)
+        return mackelab.parameters.get_filename(params, suffix)
+        #return self._get_filename(params, suffix)
 
     @classmethod
     def _get_filename(cls, params, suffix=None):
-        if params == '':
-            basename = ""
-        else:
-            # We need a sorted dictionary of parameters, so that the hash is consistent
-            flat_params = cls._params_to_arrays(params).flatten()
-                # flatten avoids need to sort recursively
-                # _params_to_arrays normalizes the data
-            sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
-            basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
-            basename += '_'
-        if isinstance(suffix, str):
-            suffix = suffix.lstrip('_')
-        if suffix is None or suffix == "":
-            assert(len(basename) > 1 and basename[-1] == '_')
-            return basename[:-1] # Remove underscore
-        elif isinstance(suffix, str):
-            return basename + suffix
-        elif isinstance(suffix, Iterable):
-            assert(len(suffix) > 0)
-            return basename + '_'.join([str(s) for s in suffix])
-        else:
-            return basename + str(suffix)
+        return mackelab.parameters.get_filename(params, suffix)
+        # if params == '':
+        #     basename = ""
+        # else:
+        #     # We need a sorted dictionary of parameters, so that the hash is consistent
+        #     flat_params = cls._params_to_arrays(params).flatten()
+        #         # flatten avoids need to sort recursively
+        #         # _params_to_arrays normalizes the data
+        #     sorted_params = OrderedDict( (key, flat_params[key]) for key in sorted(flat_params) )
+        #     basename = hashlib.sha1(bytes(repr(sorted_params), 'utf-8')).hexdigest()
+        #     basename += '_'
+        # if isinstance(suffix, str):
+        #     suffix = suffix.lstrip('_')
+        # if suffix is None or suffix == "":
+        #     assert(len(basename) > 1 and basename[-1] == '_')
+        #     return basename[:-1] # Remove underscore
+        # elif isinstance(suffix, str):
+        #     return basename + suffix
+        # elif isinstance(suffix, Iterable):
+        #     assert(len(suffix) > 0)
+        #     return basename + '_'.join([str(s) for s in suffix])
+        # else:
+        #     return basename + str(suffix)
 
     def get_pathname(self, params=None, suffix=None, subdir=None, label=""):
         """
@@ -394,17 +393,18 @@ class RunMgr:
 
     @classmethod
     def _params_to_arrays(cls, params):
-        """Also converts dictionaries to parameter sets."""
-        for name, val in params.items():
-            if isinstance(val, (ParameterSet, dict)):
-                params[name] = cls._params_to_arrays(val)
-            elif (not isinstance(val, str)
-                and isinstance(val, Iterable)
-                and all(type(v) == type(val[0]) for v in val)):
-                    # The last condition leaves objects like ('lin', 0, 1) as-is;
-                    # otherwise they would be casted to a single type
-                params[name] = np.array(val)
-        return ParameterSet(params)
+        return mackelab.parameters.params_to_arrays(params)
+        # """Also converts dictionaries to parameter sets."""
+        # for name, val in params.items():
+        #     if isinstance(val, (ParameterSet, dict)):
+        #         params[name] = cls._params_to_arrays(val)
+        #     elif (not isinstance(val, str)
+        #         and isinstance(val, Iterable)
+        #         and all(type(v) == type(val[0]) for v in val)):
+        #             # The last condition leaves objects like ('lin', 0, 1) as-is;
+        #             # otherwise they would be casted to a single type
+        #         params[name] = np.array(val)
+        # return ParameterSet(params)
 
 def _split_number(s):
     """
