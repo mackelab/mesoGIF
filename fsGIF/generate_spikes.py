@@ -46,7 +46,7 @@ def generate_spikes(mgr):
     # TODO: if dt different from Ihist, subsample Ihist
     shist = Spiketrain(Ihist, name='s', pop_sizes = params.model.N, iterative=True,
                        **runparams)
-    model_params = core.get_model_params(params.model)
+    model_params = core.get_model_params(params.model, 'GIF_spiking')
         # Needed for now because fsgif_model does not yet use ParameterSet
     spiking_model = gif.GIF_spiking(model_params, shist, Ihist,
                                     params.initializer, 

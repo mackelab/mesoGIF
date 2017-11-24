@@ -30,7 +30,7 @@ def generate_activity(mgr):
     runparams = { name: params[name] for name in params
                   if name in ['t0', 'tn', 'dt'] }
 
-    model_params = core.get_model_params(params.model)
+    model_params = core.get_model_params(params.model, 'GIF_mean_field')
         # Needed for now because fsgif_model does not yet use ParameterSet
     Ahist = Series(Ihist, name='A', shape=(len(model_params.N),), iterative=True,
                    **runparams)
