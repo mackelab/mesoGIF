@@ -11,6 +11,7 @@ from scipy.optimize import root
 from collections import namedtuple, OrderedDict, Iterable
 import logging
 import copy
+import operator
 
 import theano_shim as shim
 import sinn
@@ -80,7 +81,6 @@ class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
             t_offset    = t_offset
         )
 
-
 class GIF_spiking(models.Model):
 
     # Entries to Parameter_info: ( 'parameter name',
@@ -140,6 +140,8 @@ class GIF_spiking(models.Model):
 
         super().__init__(params)
         # NOTE: Do not use `params` beyond here. Always use self.params.
+        self.params = self.params._replace(
+            **{name: self.s.PopTerm(getattr(self.params, name)) for name in params._fields})
 
         N = self.params.N.get_value()
         assert(N.ndim == 1)
@@ -151,7 +153,7 @@ class GIF_spiking(models.Model):
         elif set_weights:
             # TODO: If parameters were less hacky, w would already be properly
             #       cast as an array
-            w = self.expand_param(np.array(self.params.w), self.params.N) * self.params.Γ
+            w = (self.s.PopTerm(self.params.w) * self.params.Γ).expand.values
                 # w includes both w and Γ from Eq. 20
             self.s.set_connectivity(w)
 
@@ -209,39 +211,19 @@ class GIF_spiking(models.Model):
         # Expand the parameters to treat them as neural parameters
         # Original population parameters are kept as a copy
         # self.pop_params = copy.copy(self.params)
-        ExpandedParams = namedtuple('ExpandedParams', ['u_rest', 't_ref', 'u_r'])
-        self.expanded_params = ExpandedParams(
-            u_rest = self.expand_param(self.params.u_rest, self.params.N),
-            t_ref = self.expand_param(self.params.t_ref, self.params.N),
-            u_r = self.expand_param(self.params.u_r, self.params.N)
-        )
+        # ExpandedParams = namedtuple('ExpandedParams', ['u_rest', 't_ref', 'u_r'])
+        # self.expanded_params = ExpandedParams(
+        #     u_rest = self.expand_param(self.params.u_rest, self.params.N),
+        #     t_ref = self.expand_param(self.params.t_ref, self.params.N),
+        #     u_r = self.expand_param(self.params.u_r, self.params.N)
+        # )
 
-        if self.s._original_tidx.get_value() < self.s.t0idx:
-            self.init_state_vars(initializer)
+        #if self.s._original_tidx.get_value() < self.s.t0idx:
+        self.init_state_vars(initializer)
 
-        # # Initialize last spike time such that it was effectively "at infinity"
-        # idx = self.t_hat.t0idx - 1; assert(idx >= 0)
-        # data = self.t_hat._data.get_value(borrow=True)
-        # data[idx, :] = shim.ones(self.t_hat.shape) * self.memory_time #* self.t_hat.dt
-        # self.t_hat._data.set_value(data, borrow=True)
-
-        # # Initialize membrane potential to u_rest
-        # idx = self.u.t0idx - 1; assert(idx >= 0)
-        # data = self.t_hat._data.get_value(borrow=True)
-        # data[idx, :] = self.expanded_params.u_rest
-        # self.u._data.set_value(data, borrow=True)
-
-        # self.params = Parameters(
-        #     N = self.params.N,
-        #     u_rest = self.params.u_rest,
-        #     w = self.params.w,
-        #     Γ = self.params.Γ,
-        #     τ_m = self.expand_param(self.params.τ_m),
-        #     t_ref = self.params.t_ref,
-        #     u_th = self.expand_param(self.params.u_th),
-        #     u_r = self.expand_param(self.params.u_r),
-        #     c = self.expand_param(self.params.c),
-        #     Δu =
+        # TODO: Do something with the state variables if we don't initialize them
+        #       (e.g. if we try to calculate t_hat, we will try to get t_hat[t-1],
+        #       which is unset)
 
     def init_state_vars(self, initializer='stationary'):
 
@@ -260,16 +242,19 @@ class GIF_spiking(models.Model):
 
         for varname in self.State._fields:
             hist = getattr(self, varname)
-            initval = getattr(init_state, varname)
-            hist.pad(1)
-            idx = hist.t0idx - 1; assert(idx >= 0)
-            data = hist._data.get_value(borrow=True)
-            data[idx,:] = initval
-            hist._data.set_value(data, borrow=True)
+            if hist._original_tidx.get_value() < hist.t0idx:
+                initval = getattr(init_state, varname)
+                hist.pad(1)
+                idx = hist.t0idx - 1; assert(idx >= 0)
+                data = hist._data.get_value(borrow=True)
+                data[idx,:] = initval
+                hist._data.set_value(data, borrow=True)
 
         # TODO: Combine the following into the loop above
         nbins = self.s.t0idx
-        self.s.update(np.arange(nbins), [ np.nonzero(timebin)[0] for timebin in init_state.s ] )
+        if self.s._original_tidx.get_value() < nbins:
+            self.s.update(np.arange(nbins),
+                          [ np.nonzero(timebin)[0] for timebin in init_state.s ] )
         #data = self.s._data
         #data[:nbins,:] = init_state.s
         #self.s._data.set_value(data, borrow=True)
@@ -278,7 +263,7 @@ class GIF_spiking(models.Model):
         # TODO: include spikes in model state, so we don't need this custom 'Stateplus'
         Stateplus = namedtuple('Stateplus', self.State._fields + ('s',))
         state = Stateplus(
-            u = self.expanded_params.u_rest,
+            u = self.params.u_rest.expand.values,  # CHECK
             t_hat = shim.ones(self.t_hat.shape) * self.memory_time,
             s = np.zeros((self.s.t0idx, self.s.shape[0]))
             )
@@ -292,7 +277,7 @@ class GIF_spiking(models.Model):
         # given by Astar; this means ISI statistics will be off as
         # we ignore refractory effects, but the overall rate will be
         # correct.
-        p = self.expand_param(Astar, self.params.N) * self.dt
+        p = self.s.PopTerm(Astar).expand.values * self.dt  # CHECK
         nbins = self.s.t0idx
         nneurons = self.s.shape[0]
         s = np.random.binomial(1, p, (nbins, nneurons))
@@ -301,15 +286,14 @@ class GIF_spiking(models.Model):
         t_hat = (s[::-1].argmax(axis=0) + 1) * self.dt
         # u is initialized by integrating the ODE from the last spike
         # See documentation for details (TODO: not yet in docs)
-        τm_exp = self.expand_param(self.params.τ_m, self.params.N)
+        #τm_exp = self.expand_param(self.params.τ_m, self.params.N)
         τmT = self.params.τ_m.flatten()[:, np.newaxis]
         η1 = τmT * self.params.p * self.params.N * self.params.w
             # As in GIF_mean_field.get_η_csts
-        u = np.where(t_hat <= self.expanded_params.t_ref,
-                     self.expanded_params.u_r,
-                     (1 - np.exp(-t_hat/τm_exp)) * self.expand_param((self.params.u_rest + η1.dot(Astar)),
-                                                                     self.params.N)
-                       + self.expanded_params.u_r * np.exp(-t_hat/τm_exp)
+        u = np.where(t_hat <= self.params.t_ref.expand.values,  # CHECK
+                     self.params.u_r.expand.values,  # CHECK
+                     ((1 - np.exp(-t_hat/self.params.τ_m)) * self.s.PopTerm( (self.params.u_rest + η1.dot(Astar)) )
+                       + self.params.u_r * np.exp(-t_hat/self.params.τ_m)).expand.values
                      )
         state = Stateplus(
             u = u,
@@ -458,10 +442,10 @@ class GIF_spiking(models.Model):
         return self.params.c * shim.exp(u/self.params.Δu.flatten())
 
 
+    # CHECK
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
-        return ( self.s.pop_rmul( self.params.τ_m,
-                                  self.s.convolve(self.ε, t) ) )
+        return ( self.params.τ_m * self.s.convolve(self.ε, t) )
             # s includes the connection weights w, and convolution also includes
             # the sums over j and β in Eq. 20.
             # Need to fix spiketrain convolution before we can use the exponential
@@ -486,30 +470,26 @@ class GIF_spiking(models.Model):
         # Euler approximation for the integral of the differential equation
         # 'm1' stands for 'minus 1', so it's the previous time bin
         red_factor = shim.exp(-self.u.dt/self.params.τ_m)
-        return shim.switch( shim.ge(self.t_hat[t_that], self.expanded_params.t_ref),
-                            self.s.pop_mul( self.u[tidx_u_m1],
-                                            red_factor )
-                            + self.s.pop_mul( self.s.pop_radd( (self.params.u_rest + self.params.R * self.I_ext[t_Iext]) ,
-                                                               self.RI_syn[t_RIsyn] ),
-                                              (1 - red_factor) ),
-                            self.expanded_params.u_r )
+        return shim.switch( shim.ge(self.t_hat[t_that], self.params.t_ref.expand.values),
+                            self.u[tidx_u_m1] * red_factor  # CHECK
+                            + ( (self.params.u_rest + self.params.R * self.I_ext[t_Iext])
+                                + self.RI_syn[t_RIsyn] ) # CHECK
+                              * (1 - red_factor), # CHECK
+                            self.params.u_r.expand.values )
 
+    # CHECK
     def varθ_fn(self, t):
         """Dynamic threshold. Eq. (22)."""
-        if t > 1:
-            sinn.flag = True
-        return self.s.pop_radd(self.params.u_th,
-                               self.s.convolve(self.θ1, t) + self.s.convolve(self.θ2, t))
+        return (self.params.u_th + self.s.convolve(self.θ1, t) + self.s.convolve(self.θ2, t)).expand_axis(-1, 'Micro').values
             # Need to fix spiketrain convolution before we can use the exponential
             # optimization. (see fixme comments in histories.spiketrain._convolve_single_t
             # and kernels.ExpKernel._convolve_single_t)
 
+    # CHECK
     def λ_fn(self, t):
         """Hazard rate. Eq. (23)."""
         # TODO: Use self.f here (requires overloading of ops to remove pop_rmul & co.)
-        return self.s.pop_rmul(self.params.c,
-                               shim.exp( self.s.pop_div( ( self.u[t] - self.varθ[t] ),
-                                                       self.params.Δu ) ) )
+        return (self.params.c * shim.exp(  (self.u[t] - self.varθ[t]) / self.params.Δu ) ).expand.values
 
     def s_fn(self, t):
         """Spike generation"""
@@ -534,44 +514,6 @@ class GIF_spiking(models.Model):
         return shim.switch( (self.s[s_tidx_m1] == 0)[cond_tslice],
                             self.t_hat[t_tidx_m1] + self.t_hat.dt,
                             self.t_hat.dt )
-
-
-
-
-# TODO: Implement pop_xxx functions as methods of Spiketrain
-def pop_add(pop_slices, neuron_term, summand):
-    if not shim.is_theano_object(neuron_term, summand):
-        assert(len(pop_slices) == len(summand))
-        return shim.concatenate([neuron_term[pop_slice] + sum_el
-                                 for pop_slice, sum_el in zip(pop_slices, summand)],
-                                axis=0)
-    else:
-        raise NotImplementedError
-
-def pop_radd(pop_slices, summand, neuron_term):
-    return pop_add(pop_slices, neuron_term, summand)
-
-def pop_mul(pop_slices, neuron_term, multiplier):
-    if not shim.is_theano_object(neuron_term, multiplier):
-        assert(len(pop_slices) == len(multiplier))
-        return shim.concatenate([neuron_term[pop_slice] * mul_el
-                                 for pop_slice, mul_el in zip(pop_slices, multiplier)],
-                                axis=0)
-    else:
-        raise NotImplementedError
-
-def pop_rmul(pop_slices, multiplier, neuron_term):
-    return pop_mul(pop_slices, neuron_term, multiplier)
-
-def pop_div(pop_slices, neuron_term, divisor):
-    if not shim.is_theano_object(neuron_term, divisor):
-        assert(len(pop_slices) == len(divisor))
-        return shim.concatenate( [ neuron_term[pop_slice] / div_el
-                                   for pop_slice, div_el in zip(pop_slices, divisor)],
-                                 axis = 0)
-    else:
-        raise NotImplementedError
-
 
 
 class GIF_mean_field(models.Model):
@@ -1168,6 +1110,10 @@ class GIF_mean_field(models.Model):
 
         # Define the equation we need to solve
         k_refs = np.rint(params.t_ref / dt).astype('int')
+        if (k_refs <= 0).any():
+            raise ValueError("The timestep (currently {}) cannot be greater than the "
+                             "shortest refractory period ({})."
+                             .format(dt, params.t_ref.min()))
         jarrs = [np.arange(k0, K) for k0 in k_refs]
         memory_time = K * dt
         def rhs(A):
