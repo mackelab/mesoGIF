@@ -1961,3 +1961,7 @@ class GIF_mean_field(models.Model):
         #                             (self.nbar, nbar) ))
 
         return updates, input_vars, output_vars
+
+
+models.register_model(GIF_spiking)
+models.register_model(GIF_mean_field)
