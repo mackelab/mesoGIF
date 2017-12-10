@@ -2,6 +2,8 @@ import os.path
 import numpy as np
 
 import theano_shim as shim
+import mackelab as ml
+import mackelab.parameters
 from sinn.histories import Series, Spiketrain
 import sinn.iotools as iotools
 
@@ -20,6 +22,17 @@ Expected parameters format:
 }
 """
 
+def add_extension(filename):
+    if os.path.exists(filename):
+        pass
+    elif os.path.exists(filename + '.npr'):
+        filename += '.npr'
+    elif os.path.exists(filename + '.sir'):
+        filename += '.sir'
+    else:
+        filename += '.npr'
+    return filename
+
 def generate_spikes(mgr):
     # Temporarily unload Theano since it isn't supported by spike history
     use_theano = shim.config.use_theano
@@ -31,11 +44,13 @@ def generate_spikes(mgr):
 
     logger.info("Generating new spike data...")
     #Ihist = Series.from_raw(iotools.loadraw(mgr.get_pathname(params.input)))
-    Ihist = mgr.load(mgr.get_pathname(params.input,
-                                      subdir=mgr.subdirs['input'],
-                                      label=''),
+    input_filename = add_extension(
+        mgr.get_pathname(params.input,
+                         subdir=mgr.subdirs['input'],
+                         label=''))
+    Ihist = mgr.load(input_filename,
                      calc='input',
-                     cls=Series.from_raw,
+                     #cls=Series.from_raw,
                      recalculate=False)
 
     # Create the spiking model
@@ -46,9 +61,12 @@ def generate_spikes(mgr):
     # TODO: if dt different from Ihist, subsample Ihist
     shist = Spiketrain(Ihist, name='s', pop_sizes = params.model.N, iterative=True,
                        **runparams)
-    model_params = core.get_model_params(params.model, 'GIF_spiking')
+    model_params_sampler = ml.parameters.ParameterSetSampler(params.model)
+    model_params = core.get_model_params(model_params_sampler.sample(),
+                                         'GIF_spiking')
         # Needed for now because fsgif_model does not yet use ParameterSet
-    spiking_model = gif.GIF_spiking(model_params, shist, Ihist,
+    spiking_model = gif.GIF_spiking(model_params,
+                                    shist, Ihist,
                                     params.initializer,
                                     set_weights=True,
                                     random_stream=rndstream)
@@ -70,8 +88,8 @@ if __name__ == "__main__":
     core.init_logging_handlers()
     mgr = core.RunMgr(description="Generate spikes", calc='spikes')
     mgr.load_parameters()
-    spike_filename = mgr.get_pathname(label='')
-    spike_activity_filename = mgr.get_pathname(label='', suffix='activity')
+    spike_filename = add_extension(mgr.get_pathname(label=''))
+    spike_activity_filename = add_extension(mgr.get_pathname(label='', suffix='activity'))
 
     generate_data = False
     try:
@@ -94,8 +112,8 @@ if __name__ == "__main__":
                 #   the derived data is NOT renamed
     if generate_data:
         # Get new filenames with the run label
-        spike_filename = mgr.get_pathname(label=None)
-        spike_activity_filename = mgr.get_pathname(suffix='activity', label=None)
+        spike_filename = add_extension(mgr.get_pathname(label=None))
+        spike_activity_filename = add_extension(mgr.get_pathname(suffix='activity', label=None))
 
         # Generate spikes
         shist = generate_spikes(mgr).s
