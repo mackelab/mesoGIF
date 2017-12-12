@@ -1,2 +1,7 @@
 * [fsgif_model] Combine the "statevars" with the State namedtuple
 * [fsgif_model] Remove the N factor from θtilde_dis
+* [fsgif_model] Stationary initializer for microscopic model
+  If the microscopic model is heterogeneous, initialization takes a long time
+  because of the huge arrays involved. Since there's no point in wasting cpu cycles
+  on a "precise" initialization, it would be better to just use population averages
+  for this.

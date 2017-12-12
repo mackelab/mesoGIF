@@ -19,8 +19,11 @@ import sinn.config as config
 from sinn.histories import Series, Spiketrain
 import sinn.kernels as kernels
 import sinn.models as models
+import sinn.popterm
 
 logger = logging.getLogger("fsgif_model")
+
+homo = False
 
 # HACK
 shim.cf.inf = 1e12
@@ -43,11 +46,17 @@ class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
     Parameters = kernels.com.define_parameters(Parameter_info)
     @staticmethod
     def get_kernel_params(model_params):
-        Npops = len(model_params.N.get_value())
+        if homo:
+            Npops = len(model_params.N.get_value())
+            height = (shim.cf.inf,)*Npops
+            stop = model_params.t_ref
+        else:
+            height = (shim.cf.inf,)*model_params.N.get_value().sum()
+            stop = model_params.t_ref.expand_blocks(['Macro', 'Micro'])
         return Kernel_θ1.Parameters(
-            height = (shim.cf.inf,)*Npops,
+            height = height,
             start  = 0,
-            stop   = model_params.t_ref
+            stop   = stop
         )
 
     def __init__(self, name, params=None, shape=None, **kwargs):
@@ -80,6 +89,15 @@ class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
             decay_const = model_params.τ_θ,
             t_offset    = t_offset
         )
+
+    # UGLY HACK: Copied function from super and added 'expand'
+    def _eval_f(self, t, from_idx=slice(None,None)):
+        expand = lambda x: x.expand_blocks(['Macro', 'Micro']) if isinstance(x, sinn.popterm.PopTerm) else x
+        return shim.switch(shim.lt(t, expand(self.params.t_offset[:,from_idx])),
+                           0,
+                           expand(self.params.height[:,from_idx]
+                             * shim.exp(-(t-self.params.t_offset[:,from_idx])
+                                       / self.params.decay_const[:,from_idx])) )
 
 class GIF_spiking(models.Model):
 
@@ -170,8 +188,12 @@ class GIF_spiking(models.Model):
         # Kernels
         shape2d = (self.Npops, self.Npops)
         self.ε = Kernel_ε('ε', self.params, shape=shape2d)
-        self.θ1 = Kernel_θ1('θ1', self.params, shape=(self.Npops,))
-        self.θ2 = Kernel_θ2('θ2', self.params, shape=(self.Npops,))
+        if homo:
+            self.θ1 = Kernel_θ1('θ1', self.params, shape=(self.Npops,))
+            self.θ2 = Kernel_θ2('θ2', self.params, shape=(self.Npops,))
+        else:
+            self.θ1 = Kernel_θ1('θ1', self.params, shape=(sum(N),))
+            self.θ2 = Kernel_θ2('θ2', self.params, shape=(sum(N),))
 
         self.add_history(self.s)
         self.add_history(self.I_ext)
@@ -489,7 +511,7 @@ class GIF_spiking(models.Model):
     def λ_fn(self, t):
         """Hazard rate. Eq. (23)."""
         # TODO: Use self.f here (requires overloading of ops to remove pop_rmul & co.)
-        return (self.params.c * shim.exp(  (self.u[t] - self.varθ[t]) / self.params.Δu ) ).expand.values
+        return (self.params.c * shim.exp(  (self.u[t] - self.varθ[t]) / self.params.Δu ) ).expand_axis(-1, 'Micro').values
 
     def s_fn(self, t):
         """Spike generation"""

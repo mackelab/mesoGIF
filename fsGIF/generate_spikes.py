@@ -65,6 +65,10 @@ def generate_spikes(mgr):
     model_params = core.get_model_params(model_params_sampler.sample(),
                                          'GIF_spiking')
         # Needed for now because fsgif_model does not yet use ParameterSet
+    # HACK: Casting to PopTerm should be automatic
+    model_params = model_params._replace(
+        τ_θ=shist.PopTerm(model_params.τ_θ),
+        τ_m=shist.PopTerm(model_params.τ_m))
     spiking_model = gif.GIF_spiking(model_params,
                                     shist, Ihist,
                                     params.initializer,
