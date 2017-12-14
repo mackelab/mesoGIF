@@ -145,6 +145,7 @@ def get_sgd(mgr, check_previous_runs=True):
 
         sgd = gd.SGD(
             cost = model.loglikelihood,
+            cost_format = 'logL',
             optimizer = mgr.params.optimizer,
             model = model,
             start = mgr.params.start,
