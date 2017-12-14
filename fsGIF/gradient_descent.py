@@ -296,6 +296,7 @@ def get_sgd(mgr, check_previous_runs=True):
         # Create the SGD from the loaded raw data
         sgd = gd.SGD(
             cost = model.loglikelihood,
+            cost_format = 'logL',
             optimizer = mgr.params.optimizer,
             model = model,
             sgd_file = sgdraw,
