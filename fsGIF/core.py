@@ -313,7 +313,7 @@ class RunMgr:
         except IOError:
             # This data does not exist
             raise FileNotFound("File '{}' does not exist."
-                                   .format(pathname))
+                               .format(pathname))
         else:
             if recalculate:
                 # Data does already exist, but we explicitly asked to recalculate it:
@@ -328,7 +328,7 @@ class RunMgr:
                 # Data was found; load it.
                 logger.info("Precomputed {} data found."
                             .format(calc))
-                if cls is None:
+                if cls is None or not isinstance(data, np.lib.npyio.NpzFile):
                     return data
                 else:
                     return cls(data)
@@ -440,6 +440,21 @@ def isarchived(filename):
         return True
     else:
         return False
+
+def add_extension(filename):
+    """Append either '.npr', or '.sir' to a filename, depending on
+    whether a file with that extension exists. If no file exists,
+    append '.npr'
+    """
+    if os.path.exists(filename):
+        pass
+    elif os.path.exists(filename + '.npr'):
+        filename += '.npr'
+    elif os.path.exists(filename + '.sir'):
+        filename += '.sir'
+    else:
+        filename += '.npr'
+    return filename
 
 def get_param_values(param_desc):
     """

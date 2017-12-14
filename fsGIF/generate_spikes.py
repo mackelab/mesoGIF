@@ -22,17 +22,6 @@ Expected parameters format:
 }
 """
 
-def add_extension(filename):
-    if os.path.exists(filename):
-        pass
-    elif os.path.exists(filename + '.npr'):
-        filename += '.npr'
-    elif os.path.exists(filename + '.sir'):
-        filename += '.sir'
-    else:
-        filename += '.npr'
-    return filename
-
 def generate_spikes(mgr):
     # Temporarily unload Theano since it isn't supported by spike history
     use_theano = shim.config.use_theano
@@ -44,7 +33,7 @@ def generate_spikes(mgr):
 
     logger.info("Generating new spike data...")
     #Ihist = Series.from_raw(iotools.loadraw(mgr.get_pathname(params.input)))
-    input_filename = add_extension(
+    input_filename = core.add_extension(
         mgr.get_pathname(params.input,
                          subdir=mgr.subdirs['input'],
                          label=''))
@@ -92,8 +81,8 @@ if __name__ == "__main__":
     core.init_logging_handlers()
     mgr = core.RunMgr(description="Generate spikes", calc='spikes')
     mgr.load_parameters()
-    spike_filename = add_extension(mgr.get_pathname(label=''))
-    spike_activity_filename = add_extension(mgr.get_pathname(label='', suffix='activity'))
+    spike_filename = core.add_extension(mgr.get_pathname(label=''))
+    spike_activity_filename = core.add_extension(mgr.get_pathname(label='', suffix='activity'))
 
     generate_data = False
     try:
@@ -116,8 +105,8 @@ if __name__ == "__main__":
                 #   the derived data is NOT renamed
     if generate_data:
         # Get new filenames with the run label
-        spike_filename = add_extension(mgr.get_pathname(label=None))
-        spike_activity_filename = add_extension(mgr.get_pathname(suffix='activity', label=None))
+        spike_filename = core.add_extension(mgr.get_pathname(label=None))
+        spike_activity_filename = core.add_extension(mgr.get_pathname(suffix='activity', label=None))
 
         # Generate spikes
         shist = generate_spikes(mgr).s

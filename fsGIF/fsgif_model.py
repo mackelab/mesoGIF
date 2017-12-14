@@ -23,7 +23,7 @@ import sinn.popterm
 
 logger = logging.getLogger("fsgif_model")
 
-homo = False
+homo = True
 
 # HACK
 shim.cf.inf = 1e12
@@ -52,7 +52,12 @@ class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
             stop = model_params.t_ref
         else:
             height = (shim.cf.inf,)*model_params.N.get_value().sum()
-            stop = model_params.t_ref.expand_blocks(['Macro', 'Micro'])
+            stop = model_params.t_ref
+            if isinstance(model_params.t_ref, sinn.popterm.PopTerm):
+                # TODO: This is only required because some operations
+                #       aren't yet supported by PopTerm, so we expand
+                #       manually. Once that is fixed, we should remove this.
+                stop = stop.expand_blocks(['Macro', 'Micro'])
         return Kernel_θ1.Parameters(
             height = height,
             start  = 0,

@@ -94,6 +94,8 @@ def get_sgd(mgr, check_previous_runs=True):
                                       subdir=params.input.dir,
                                       suffix=params.input.name,
                                       label='')
+    data_filename = core.add_extension(data_filename)
+    input_filename = core.add_extension(input_filename)
 
     if check_previous_runs:
         # Now load the sgd file
@@ -176,8 +178,13 @@ def get_sgd(mgr, check_previous_runs=True):
         if ( 'params' in params.data and isinstance(params.data, ParameterSet)
              and 'model' in params.data.params
              and isinstance(params.data.params, ParameterSet) ):
-            sgd.set_ground_truth(core.get_model_params(params.data.params.model,
-                                                       params.model.type))
+            #trueparams = core.get_model_params(params.data.params.model,
+            #                                   params.model.type)
+            # >>>> HACK <<<<<< Above doesn't work e.g. for hetero parameters, which
+            #                  aren't compatible with the meso model
+            trueparams = core.get_model_params(params.model.params,
+                                               params.model.type)
+            sgd.set_ground_truth(trueparams)
 
         if init_vals is not None:
             init_vals_format = getattr(init_vals, 'format', 'cartesian')
