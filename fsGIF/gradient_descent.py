@@ -10,7 +10,8 @@ import sinn
 import sinn.histories as histories
 import sinn.optimize.gradient_descent as gd
 from sinn.histories import Series, Spiketrain
-import sinn.iotools as iotools
+import mackelab as ml
+import mackelab.iotools
 
 from fsGIF import core
 logger = core.logger
@@ -372,4 +373,4 @@ if __name__ == "__main__":
 
     if sgd is not None:
         output_filename = get_sgd_pathname(mgr, n_iterations, label=None)
-        iotools.saveraw(output_filename, sgd)
+        ml.iotools.save(output_filename, sgd)
