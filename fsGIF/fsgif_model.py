@@ -23,7 +23,7 @@ import sinn.popterm
 
 logger = logging.getLogger("fsgif_model")
 
-homo = True
+homo = True  # HACK
 
 # HACK
 shim.cf.inf = 1e12

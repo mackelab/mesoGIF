@@ -12,6 +12,7 @@ logger = core.logger
 ############################
 # Model import
 from fsGIF import fsgif_model as gif
+gif.homo = False  # HACK
 ############################
 
 """
