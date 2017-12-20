@@ -117,10 +117,10 @@ if __name__ == "__main__":
         shist = generate_spikes(mgr).s
 
         # Save to file
-        iotools.saveraw(spike_filename, shist)
+        iotools.save(spike_filename, shist, format='npr')
 
         # Compute the associated activity trace
         logger.info("Computing activity from spike data")
         Ahist = core.compute_spike_activity(shist)
-        iotools.saveraw(spike_activity_filename, Ahist)
+        iotools.save(spike_activity_filename, Ahist, format='npr')
 
