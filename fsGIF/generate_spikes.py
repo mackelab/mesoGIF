@@ -4,8 +4,8 @@ import numpy as np
 import theano_shim as shim
 import mackelab as ml
 import mackelab.parameters
+import mackelab.iotools as iotools
 from sinn.histories import Series, Spiketrain
-import sinn.iotools as iotools
 
 from fsGIF import core
 logger = core.logger
@@ -33,15 +33,19 @@ def generate_spikes(mgr):
     rndstream = core.get_random_stream(seed)
 
     logger.info("Generating new spike data...")
-    #Ihist = Series.from_raw(iotools.loadraw(mgr.get_pathname(params.input)))
+    #Ihist = iotools.loadraw(mgr.get_pathname(params.input))
+    # Ihist = mgr.load(input_filename,
+    #                  calc='input',
+    #                  #cls=Series.from_raw,
+    #                  recalculate=False)
     input_filename = core.add_extension(
         mgr.get_pathname(params.input,
                          subdir=mgr.subdirs['input'],
                          label=''))
-    Ihist = mgr.load(input_filename,
-                     calc='input',
-                     #cls=Series.from_raw,
-                     recalculate=False)
+    Ihist = iotools.load(input_filename)
+    if isinstance(Ihist, np.lib.npyio.NpzFile):
+        # Support older data files
+        Ihist = Series.from_raw(Ihist)
 
     # Create the spiking model
     # We check if different run parameters were specified,
