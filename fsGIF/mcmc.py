@@ -106,10 +106,12 @@ def get_model(mgr):
                                       subdir = postparams.data.dir,
                                       suffix = postparams.data.name,
                                       label = '')
+    data_filename = core.add_extension(data_filename)
     input_filename = mgr.get_pathname(params = postparams.input.params,
                                       subdir = postparams.input.dir,
                                       suffix = postparams.input.name,
                                       label = '')
+    input_filename = core.add_extension(input_filename)
 
     data_history = mgr.load(data_filename,
                             cls=getattr(histories, postparams.data.type).from_raw,

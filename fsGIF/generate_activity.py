@@ -19,11 +19,19 @@ def generate_activity(mgr):
     rndstream = core.get_random_stream(seed)
 
     logger.info("Generating new activity data...")
-    Ihist = core.subsample(
-        Series.from_raw(iotools.loadraw(
-            mgr.get_pathname(params=params.input,
-                             subdir=mgr.subdirs['input']))),
-        params.dt)
+    # Ihist = core.subsample(
+    #     Series.from_raw(iotools.loadraw(
+    #         mgr.get_pathname(params=params.input,
+    #                          subdir=mgr.subdirs['input']))),
+    #     params.dt)
+    input_filename = core.add_extension(
+        mgr.get_pathname(params.input,
+                         subdir=mgr.subdirs['input'],
+                         label=''))
+    Ihist = iotools.load(input_filename)
+    if isinstance(Ihist, np.lib.npyio.NpzFile):
+        # Support older data files
+        Ihist = Series.from_raw(Ihist)
     # Create the spiking model
     # We check if different run parameters were specified,
     # otherwise those from Ihist will be taken
@@ -53,9 +61,9 @@ if __name__ == "__main__":
         mgr.load(activity_filename, cls=Series.from_raw)
     except (core.FileNotFound, core.FileRenamed):
         # Get pathname with run label
-        activity_filename = mgr.get_pathname(label=None)
+        activity_filename = core.add_extension(mgr.get_pathname(label=None))
         # Create mean-field model and generate activity
         mfmodel = generate_activity(mgr)
         # Save to file
-        iotools.saveraw(activity_filename, mfmodel.A)
+        iotools.save(activity_filename, mfmodel.A, format='npr')
 
