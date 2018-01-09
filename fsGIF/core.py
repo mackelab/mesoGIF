@@ -337,22 +337,48 @@ class RunMgr:
         """Wrapper for the internal ArgParse parser instance."""
         self.parser(*args, **kwargs)
 
-    def load_parameters(self):
+    def load_parameters(self, args=None, param_file=None):
         """
         Load a parameter file.
         `np.array` is called on every non-string iterable parameter,
         so that nested lists and tuples become Nd arrays.
+
+        Parameters
+        ----------
+        args: list of strings
+            Provide the command line parameters, overriding them if they are present.
+        param_file: string
+            Path to parameter file. Overrides the path obtained from arguments.
         """
+        if args is None:
+            if param_file is None:
+                arglist = sys.argv[1:]
+            else:
+                arglist = []
+        else:
+            arglist = args
+        # Get parameter file from command line arguments
         # parser.add_argument('--theano', action='store_true',
         #                     help="If specified, indicate tu use Theano. Otherwise, "
         #                          "the Numpy implementation is used.")
         #params = core.load_parameters(sys.argv[1])
-        if self.smtlabel == 'cmdline':
+        if (len(arglist) > 0 and self.smtlabel == 'cmdline'
+            and args is None and param_file is None):
             # Remove the label Sumatra appended before processing cmdline options
-            self.label = sys.argv.pop()
-        args = self.parser.parse_args()
+            # Only do this if parameters were obtained from the command line
+            self.label = arglist.pop()
+        if param_file is not None:
+            if len(arglist) == 0:
+                # Don't force users to use dummy parameters if param_file is given
+                arglist.append(param_file)
+            else:
+                arglist[-1] = param_file
+        args = self.parser.parse_args(arglist)
 
-        self.recalculate = args.recalculate
+        if hasattr(args, 'recalculate'):
+            self.recalculate = args.recalculate
+        else:
+            self.recalculate = False
 
         self.params = self._params_to_arrays(ParameterSet(args.parameters))
         if 'theano' in self.params and self.params.theano:
