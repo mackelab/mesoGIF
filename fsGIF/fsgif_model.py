@@ -1420,7 +1420,12 @@ class GIF_mean_field(models.Model):
         startidx = self.get_t_idx(start)
         stopidx = startidx + self.index_interval(batch_size)
         N = self.params.N
-        n_full = self.n if data is None else data
+        if data is None:
+            n_full = self.n
+            t0idx = self.n.t0idx
+        else:
+            n_full = data
+            t0idx = 0 # No offset if we provide data
 
         # Windowed test
         #windowlen = 5
@@ -1437,7 +1442,7 @@ class GIF_mean_field(models.Model):
                 statevar_updates = {}
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
-            n = shim.cast(n_full[tidx+self.n.t0idx], 'int32')
+            n = shim.cast(n_full[tidx+t0idx], 'int32')
             #n = shim.cast(self.n[tidx+self.n.t0idx-windowlen:tidx+self.n.t0idx].sum(axis=0), 'int32')
 
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
