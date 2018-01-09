@@ -2,6 +2,7 @@ import numpy as np
 import pymc3 as pymc
 from mackelab.pymc3 import PyMCPrior, export_multitrace
 from mackelab.parameters import Transform
+import mackelab.parameters
 
 from parameters import ParameterSet
 import theano_shim as shim
@@ -15,6 +16,7 @@ from fsGIF import core
 logger = core.logger
 ############################
 # Model import
+import fsGIF.fsgif_model as fsgif_model
 from fsGIF import fsgif_model as gif
 ############################
 
@@ -26,6 +28,10 @@ shim.gettheano().config.floatX = sinn.config.floatX
 Transform.namespaces.update({'shim': shim})
 
 class nDist(pymc.distributions.Continuous):
+    # FIXME Make logp() more robust
+    # logp() takes n as input, but nothing ensures that n aligns with the index
+    # of self.start.
+    # We could consider providing only logp_sum (see distributions.Distribution.logp_sum)
 
     def __init__(self, start, batch_size, model, variables, **kwargs):
         """
@@ -53,7 +59,7 @@ class nDist(pymc.distributions.Continuous):
             raise ValueError(msg)
 
     def logp(self, n):
-        model_graph = self.model.loglikelihood(self.start, self.batch_size, n)[0]
+        model_graph = self.model.loglikelihood(self.start, self.batch_size)[0]
         return shim.gettheano().clone(model_graph, self.variables)
 
     def _repr_latex_(self, name=None, dist=None):
@@ -63,7 +69,7 @@ class nDist(pymc.distributions.Continuous):
             name = "n"
         return r"${} \sim \text{{fsGIF}}(…)$".format(name)
 
-def run_mcmc(mgr, model):
+def get_pymc_model(mgr, model):
 
     varnames = getattr(mgr.params.posterior, 'variables',
                        list(mgr.params.posterior.mask.keys()))
@@ -96,6 +102,11 @@ def run_mcmc(mgr, model):
                                for varname, prior in priors.items()},
                   observed = ndata)
 
+    return pymc_model
+
+def run_mcmc(mgr, model):
+    pymc_model = get_pymc_model(mgr, model)
+    with pymc_model:
         trace = pymc.sample(**mgr.params.sampler)
 
     return trace
@@ -107,6 +118,10 @@ def get_model(mgr):
                                       suffix = postparams.data.name,
                                       label = '')
     data_filename = core.add_extension(data_filename)
+    # flat_params = mackelab.parameters.params_to_arrays(postparams.data.params).flatten()
+    # f, _ = mackelab.iotools.get_free_file("debug_dump", bytes=False)
+    # f.write('\n'.join(str(key) + ', ' + str(flat_params[key]) for key in sorted(flat_params)))
+    # f.close
     input_filename = mgr.get_pathname(params = postparams.input.params,
                                       subdir = postparams.input.dir,
                                       suffix = postparams.input.name,
