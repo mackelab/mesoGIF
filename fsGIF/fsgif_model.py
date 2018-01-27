@@ -95,14 +95,16 @@ class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
             t_offset    = t_offset
         )
 
-    # UGLY HACK: Copied function from super and added 'expand'
-    def _eval_f(self, t, from_idx=slice(None,None)):
-        expand = lambda x: x.expand_blocks(['Macro', 'Micro']) if isinstance(x, sinn.popterm.PopTerm) else x
-        return shim.switch(shim.lt(t, expand(self.params.t_offset[:,from_idx])),
-                           0,
-                           expand(self.params.height[:,from_idx]
-                             * shim.exp(-(t-self.params.t_offset[:,from_idx])
-                                       / self.params.decay_const[:,from_idx])) )
+
+    if not homo:
+        # UGLY HACK: Copied function from ExpKernel and added 'expand'
+        def _eval_f(self, t, from_idx=slice(None,None)):
+            expand = lambda x: x.expand_blocks(['Macro', 'Micro']) if isinstance(x, sinn.popterm.PopTerm) else x
+            return shim.switch(shim.lt(t, expand(self.params.t_offset[:,from_idx])),
+                            0,
+                            expand(self.params.height[:,from_idx]
+                                * shim.exp(-(t-self.params.t_offset[:,from_idx])
+                                        / self.params.decay_const[:,from_idx])) )
 
 class GIF_spiking(models.Model):
 
@@ -867,7 +869,7 @@ class GIF_mean_field(models.Model):
             T -= self.A.dt
 
         T = max(T, 5*self.params.τ_m.get_value().max(), self.A.dt)
-        K = self.index_interval(T)
+        K = self.index_interval(T, allow_rounding=True)
         return T, K
 
     def init_kernels(self):
