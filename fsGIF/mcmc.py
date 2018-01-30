@@ -1,5 +1,6 @@
 import numpy as np
 import pymc3 as pymc
+import mackelab as ml
 from mackelab.pymc3 import PyMCPrior, export_multitrace
 from mackelab.parameters import Transform
 import mackelab.parameters
@@ -18,7 +19,13 @@ logger = core.logger
 # Model import
 import fsGIF.fsgif_model as fsgif_model
 from fsGIF import fsgif_model as gif
+data_dir = "data"
 ############################
+
+############################
+# Exceptions
+class ModelSpecificationError(Exception):
+    pass
 
 shim.load_theano()
 shim.gettheano().config.compute_test_value = 'raise'
@@ -60,7 +67,19 @@ class nDist(pymc.distributions.Continuous):
 
     def logp(self, n):
         model_graph = self.model.loglikelihood(self.start, self.batch_size)[0]
-        return shim.gettheano().clone(model_graph, self.variables)
+        logp = shim.gettheano().clone(model_graph, self.variables)
+        # Sanity check on logp: ensure all variable names are unique
+        varnames = [v.name for v in shim.graph.inputs([logp]) if v.name is not None]
+        counts = {name: varnames.count(name) for name in np.unique(varnames)}
+        if any(c > 1 for c in counts.values()):
+            names = [name for name, c in counts.items() if c > 1]
+            namestr = "name" if len(names) == 1 else "names"
+            raise ModelSpecificationError("There are multiple variables with the {} {}. "
+                                          "Since PyMC3 calls Theano functions with keyword "
+                                          "arguments, this may make these calls ambiguous. "
+                                          "Please ensure all variable names are unique."
+                                          .format(namestr, ', '.join(names)))
+        return logp
 
     def _repr_latex_(self, name=None, dist=None):
         if dist is None:
@@ -70,15 +89,17 @@ class nDist(pymc.distributions.Continuous):
         return r"${} \sim \text{{fsGIF}}(…)$".format(name)
 
 def get_pymc_model(mgr, model):
+    return get_pymc_model_new(mgr.params.posterior, model)
 
-    varnames = getattr(mgr.params.posterior, 'variables',
-                       list(mgr.params.posterior.mask.keys()))
+def get_pymc_model_new(params, model):
+    varnames = getattr(params, 'variables',
+                       list(params.mask.keys()))
     varnames = list(varnames)
         # Easier to dynamically remove elements from a list than an array
-    masks = getattr(mgr.params.posterior, 'mask', {})
-    priorparams = mgr.params.posterior.model.prior
+    masks = getattr(params, 'mask', {})
+    #priorparams = params.model.prior
     priorparams = ParameterSet(
-        {key: value for key, value in priorparams.items()
+        {key: value for key, value in params.model.prior.items()
          if key in varnames})
     for varname in varnames[:]:
         assert(varname in priorparams)
@@ -96,7 +117,7 @@ def get_pymc_model(mgr, model):
     with pymc.Model() as pymc_model:
         priors = PyMCPrior(priorparams, modelvars)
         ndata = model.n._data.get_value()   # temp: nDist should be generic Dist
-        n = nDist('n', mgr.params.posterior.burnin, mgr.params.posterior.datalen,
+        n = nDist('n', params.burnin, params.datalen,
                   model = model,
                   variables = {getattr(model.params, varname) : prior
                                for varname, prior in priors.items()},
@@ -142,6 +163,43 @@ def get_model(mgr):
 
     model = core.construct_model(gif, postparams.model, data_history, input_history,
                                  initializer=postparams.model.initializer)
+    return model
+
+def get_model_new(params):
+    """
+    Parameters
+    ----------
+    params: ParameterSet
+        Parameters describing the posterior
+    """
+    global data_dir
+    data_filename = core.get_pathname(data_dir = data_dir,
+                                      params = params.data.params,
+                                      subdir = params.data.dir,
+                                      suffix = params.data.name,
+                                      label = '')
+    data_filename = core.add_extension(data_filename)
+    input_filename = core.get_pathname(data_dir = data_dir,
+                                      params = params.input.params,
+                                      subdir = params.input.dir,
+                                      suffix = params.input.name,
+                                      label = '')
+    input_filename = core.add_extension(input_filename)
+
+    data_history = ml.iotools.load(data_filename, input_format='npr')
+    if isinstance(data_history, np.lib.npyio.NpzFile):
+        # Support older data files
+        data_history = Series.from_raw(data_history)
+    data_history = core.subsample(data_history, params.model.dt)
+
+    input_history = ml.iotools.load(input_filename, input_format='npr')
+    if isinstance(input_history, np.lib.npyio.NpzFile):
+        # Support older data files
+        input_history = Series.from_raw(input_history)
+    input_history = core.subsample(input_history, params.model.dt)
+
+    model = core.construct_model(gif, params.model, data_history, input_history,
+                                 initializer=params.model.initializer)
     return model
 
 if __name__ == "__main__":

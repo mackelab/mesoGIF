@@ -247,18 +247,19 @@ class RunMgr:
             Sumatra is used (this requires that `load_parameters` has already been executed).
         """
 
-        if params is None and self.params is None:
-            raise RuntimeError("You must call `load_parameters` before getting a path name.")
+        if params is None:
+            if self.params is None:
+                raise RuntimeError("You must call `load_parameters` before getting a path name.")
+            else:
+                params = self.params
         if subdir is None:
             subdir = self.subdir
         elif subdir[0] == '+':
             subdir = os.path.join(self.subdir, subdir[1:])
         if label is None:
             label = self.label
-        label_dir = "" if label == "" else self.label_dir
-            # Only add the label directory when there's a label
-        return os.path.join(self.data_dir, label_dir, label, subdir,
-                            self.get_filename(params, suffix))
+        return get_pathname(self.data_dir, params, suffix, subdir, self.label_dir, label)
+
 
     @staticmethod
     def rename_to_free_file(path):
@@ -481,6 +482,13 @@ def add_extension(filename):
     else:
         filename += '.npr'
     return filename
+
+def get_pathname(data_dir, params, suffix, subdir, label_dir=None, label=""):
+    label_dir = "" if label == "" else label_dir
+        # Only add the label directory when there's a label
+    assert(label_dir is not None)  # label_dir only optional if label==""
+    return os.path.join(data_dir, label_dir, label, subdir,
+                        ml.parameters.get_filename(params, suffix))
 
 def get_param_values(param_desc):
     """
