@@ -59,7 +59,7 @@ class nDist(pymc.distributions.Continuous):
             # TODO: Custom error type: ParameterError ?
             # TODO: Print name (e.g. 'row', 'column') instead of broadcast pattern when possible
             msg = "The following random variables don't match their shape in the model:"
-            msg += "\n  (var): (model broadcast pattern) vs (random variable broadcast pattern)\n"
+            msg += "\n  [var]: [model broadcast pattern] vs [random variable broadcast pattern]\n"
             msg += '\n'.join(["  - {}: {} vs {}"
                               .format(key.name, key.broadcastable, val.broadcastable)
                               for key, val in shape_mismatch])
@@ -102,9 +102,9 @@ def get_pymc_model_new(params, model):
         {key: value for key, value in params.model.prior.items()
          if key in varnames})
     for varname in varnames[:]:
-        assert(varname in priorparams)
-        mask = masks[varname]
         if varname in masks:
+            assert(varname in priorparams)
+            mask = masks[varname]
             if not np.any(mask):
                 varnames.remove(varname)
                 del masks[varname]
