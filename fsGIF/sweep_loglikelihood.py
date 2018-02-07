@@ -138,14 +138,18 @@ if __name__ == "__main__":
     #output_filename = core.get_pathname(core.likelihood_subdir, params)
     #data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
     logL_filename = mgr.get_pathname(label='')
+    logL_filename = core.add_extension(logL_filename)
     data_filename = mgr.get_pathname(params=posparams.data.params,
                                      subdir=posparams.data.dir,
                                      suffix=posparams.data.name,
                                      label='')
+    data_filename = core.add_extension(data_filename)
     input_filename = mgr.get_pathname(params=posparams.input.params,
                                       subdir=posparams.input.dir,
                                       suffix=posparams.input.name,
                                       label='')
+    input_filename = core.add_extension(input_filename)
+
     try:
         if mgr.args.debug:
             # Don't try to load previous data if debugging
