@@ -96,9 +96,11 @@ class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
         )
 
 
-    if not homo:
-        # UGLY HACK: Copied function from ExpKernel and added 'expand'
-        def _eval_f(self, t, from_idx=slice(None,None)):
+    # UGLY HACK: Copied function from ExpKernel and added 'expand'
+    def _eval_f(self, t, from_idx=slice(None,None)):
+        if homo:
+            return super()._eval_f(t, from_idx)
+        else:
             expand = lambda x: x.expand_blocks(['Macro', 'Micro']) if isinstance(x, sinn.popterm.PopTerm) else x
             return shim.switch(shim.lt(t, expand(self.params.t_offset[:,from_idx])),
                             0,
