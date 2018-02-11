@@ -1326,7 +1326,7 @@ class GIF_mean_field(models.Model):
         if stop == 'end':
             stopidx = self.nbar.tnidx
         else:
-            stopidx = self.nbar.get_t_idx(stop + self.nbar.t0idx)
+            stopidx = self.index_interval(stop) + self.nbar.t0idx
 
         # Make sure we don't go beyond given data
         for h in self.history_set:
