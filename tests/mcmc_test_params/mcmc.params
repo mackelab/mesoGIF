@@ -1,0 +1,16 @@
+{
+  'posterior': url("mcmc_test_params/posterior-2pop.params"),
+ 
+  'sampler': {
+    # Directly passed as keyword parameters to pymc3.sample()
+#    'draws' : 600,
+#    'tune'  : 300,
+    'draws' : 5,
+    'tune'  : 100,
+    'init'  : 'adapt_diag',
+    'discard_tuned_samples': False,
+    'chain' : 0,
+    'chains': 1,
+    'njobs' : 1,
+  }
+}

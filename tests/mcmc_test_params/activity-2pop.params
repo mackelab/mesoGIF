@@ -1,0 +1,14 @@
+{
+  "spikes": url("mcmc_test_params/spikes-2pop.params"),
+      # Not part of the spec; used to reference the other parameters
+  "model": "spikes->",
+  "input": "spikes->",
+  "seed": 314,
+  "initializer": "spikes->",
+  "theano": False,
+
+  "t0": "spikes->",
+  "tn": "spikes->",
+  #"dt": 0.001,
+  "dt": "spikes->",
+}

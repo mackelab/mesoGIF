@@ -1,0 +1,70 @@
+{
+
+  'w': {
+    # TODO: Switch to bi-modal distribution when mixed distributions are supported
+    #       See 'prior-gd-old.params' for format.
+    'dist': 'normal',
+    'shape': (2,2),
+    'loc': 0,
+    'scale': 1
+  },
+  'u_th': {
+    'dist': 'normal',
+    'shape': (2,),
+    'loc': 15,
+    'scale': 10
+  },
+  'u_r': {
+    'dist': 'normal',
+    'shape': (2,),
+    'loc': 0,
+    'scale': 10
+  },
+  'c': {
+    'dist': 'gamma',
+    'shape': (2,),
+    'a': 2,
+    'scale' : 5,
+  },
+  'Δu': {
+    'dist': 'gamma',
+    'shape': (2,),
+    #'loc': 0,      # Below this value prior is identically zero; not currently supported
+    'a': 3,        # mean = a * scale
+    'scale': 1.5
+  },
+  'τ_m': {
+    'transform': {'name' : 'τ_m -> logτ_m',     # First name must be the same used in the model definition
+                  'to'   : 'τ -> shim.log10(τ)',
+                  'back' : 'logτ -> 10**logτ'},
+    # Distribution is on the transformed parameter space
+    'dist': 'normal',  # use mvnormal if variables are correlated
+    'shape': (2,),  # Always the shape of the mean
+    'loc': -2,      # 'loc' in the transformed space
+    'scale': 2,     # 'scale' in the transformed space
+  },
+  'τ_s': {
+    'transform': {'name' : 'τ_s -> logτ_s',
+                  'to'   : 'τ -> shim.log10(τ)',
+                  'back' : 'logτ -> 10**logτ'},
+    'dist': 'normal',
+    'shape': (1,2),
+    'loc': -3,
+    'scale': 3,
+  },
+  'τ_θ': {
+    'transform': {'name' : 'τ_θ -> logτ_θ',
+                  'to'   : 'τ -> shim.log10(τ)',
+                  'back' : 'logτ -> 10**logτ'},
+    'dist': 'normal',
+    'shape': (1,2),
+    'loc': -1,
+    'scale': 5,
+  },
+  'J_θ': {
+    # J_θ must not be negative
+    'dist': 'exponential',
+    'shape': (1, 2),
+    'scale': 0.5,
+  }
+}

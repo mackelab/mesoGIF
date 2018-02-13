@@ -1,0 +1,17 @@
+{
+  "t0": 0,
+  "tn": 20,
+  "dt": 0.0002,
+  "seed": 314,
+
+  "eval": "Iext",
+  "inputs": ['Iext'],
+  'Iext': {
+    # Cheating because I don't have a 'cst' history function yet
+    'function': 'Sin',
+    'baseline': [0, 0],
+    'amplitude': [0, 0],
+    'frequency': 0,
+    'phase': 0,
+  }
+}

@@ -1,0 +1,46 @@
+{
+
+  "variables": ['w', 'c', 'u_th', 'u_r', 'Δu', 'τ_m', 'τ_s', 'τ_θ', 'J_θ'],
+
+  'mask': {
+    # Overwrites masks defined in 'model.prior' 
+    'w':    [[True, False],
+             [False, False]],
+    'c':    False,
+    'u_th': False,
+    'u_r':  False,
+    'Δu':   False,
+    'τ_m':  [False, True],
+    'τ_s':  False,
+    'τ_θ':  False,
+    'J_θ':  False,
+  },
+  
+  "burnin": 10.0,
+  "datalen": 2.0,
+
+  "data": {
+        "type": "Series",
+            # Name of a class defined in sinn.histories
+        "dir": "activity",
+        "params": url("mcmc_test_params/activity-2pop.params"),
+        "name": "",
+            # The data filename is obtained as data_dir + sha1(data_params) + '_' + data_name
+            # As a special case, if data_params = "" or None, then the joining '_' is omitted
+      },
+
+  "input": {
+        "type": "Series",
+        "dir": "inputs",
+        "params": url("mcmc_test_params/no-input-2pop.params"),
+        "name": "",
+    },
+
+  "model": {
+        "type": "GIF_mean_field",
+        "params": url("mcmc_test_params/model2pop.params"),
+        "initializer": 'stationary',
+        "dt": 0.001,
+        "prior": url("mcmc_test_params/prior-2pop.params")
+      }
+}

@@ -1,0 +1,10 @@
+{
+  "model": url("mcmc_test_params/model2pop.params"),
+  "input": url("mcmc_test_params/no-input-2pop.params"),
+  "seed": "input->",
+  "initializer": "silent",
+  "theano": False,
+  "t0": "input->",
+  "tn": "input->",
+  "dt": "input->"
+  }
