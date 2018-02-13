@@ -269,7 +269,7 @@ if __name__ == "__main__":
     trace = run_mcmc(mgr, model)
 
     mcmc_filename = mgr.get_pathname(label=None)
-    mcmc_filename = "test_mcmc_mle-start"  # DEBUG
+    #mcmc_filename = "test_mcmc_mle-start"  # DEBUG
     iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
 
 
