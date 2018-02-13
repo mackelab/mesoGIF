@@ -1,3 +1,4 @@
+import os.path
 import numpy as np
 import pymc3 as pymc
 import mackelab as ml
@@ -88,6 +89,29 @@ class nDist(pymc.distributions.Continuous):
             name = "n"
         return r"${} \sim \text{{fsGIF}}(…)$".format(name)
 
+class Model(pymc.model.Model):
+    """
+    Add to PyMC3 models the ability to specify a setup
+    function which is run every time just before any compiled
+    function is called.
+
+    Parameters
+    ----------
+    setup: callable
+        Function taking no arguments. Will be called just before evaluating
+        any compiled function.
+    """
+    def __init__(self, name='', setup=None, model=None, theano_config=None):
+        self.setup = setup
+        super().__init__(name=name, model=model, theano_config=theano_config)
+
+    def makefn(self, outs, mode=None, *args, **kwargs):
+        f = super().makefn(outs, mode, *args, **kwargs)
+        def makefn_wrapper(*args, **kwargs):
+            self.setup()
+            return f(*args, **kwargs)
+        return makefn_wrapper
+
 def get_pymc_model(mgr, model):
     return get_pymc_model_new(mgr.params.posterior, model)
 
@@ -114,23 +138,54 @@ def get_pymc_model_new(params, model):
 
     modelvars = [getattr(model.params, varname) for varname in varnames]
 
-    with pymc.Model() as pymc_model:
+    burnin_idx = model.index_interval(params.burnin)
+    def setup():
+        model.clear_unlocked_histories()
+        model.init_latent_vars(params.model.initializer)
+        model.advance(burnin_idx)
+
+    with Model(setup=setup) as pymc_model:
         priors = PyMCPrior(priorparams, modelvars)
         ndata = model.n._data.get_value()   # temp: nDist should be generic Dist
         n = nDist('n', params.burnin, params.datalen,
                   model = model,
-                  variables = {getattr(model.params, varname) : prior
+                  variables = {getattr(model.params, varname) : prior.pymc_var
                                for varname, prior in priors.items()},
                   observed = ndata)
 
-    return pymc_model
+    return pymc_model, priors
 
 def run_mcmc(mgr, model):
-    pymc_model = get_pymc_model(mgr, model)
+    pymc_model, priors = get_pymc_model(mgr, model)
+    kwds = mgr.params.sampler
+    if 'start' not in kwds:
+        start = get_mle_start(mgr.params.posterior, priors)
+        if start is not None:
+            kwds['start'] = start
     with pymc_model:
-        trace = pymc.sample(**mgr.params.sampler)
+        trace = pymc.sample(**kwds)
 
     return trace
+
+def get_mle_start(posterior_params, priors):
+    dataroot = "data"
+        # HACK/TODO: Get this from sumatra project
+    filename = ml.parameters.get_filename(posterior_params) + '.repr'
+    pathname = os.path.join(dataroot, "MLE", filename)
+    try:
+        mlestr = iotools.load(pathname)
+    except FileNotFoundError:
+        return None
+    else:
+        mles = ParameterSet(eval(mlestr, {'array': np.array}))
+            # FIXME: Don't use eval()
+        start = {}
+        for prior in priors.values():
+            mle = mles[prior.transform.names.orig]
+            if prior.mask is not None:
+                mle = mle[prior.mask]
+            start[prior.transform.names.new] = prior.transform.to(mle)
+        return start
 
 def get_model(mgr):
     postparams = mgr.params.posterior
@@ -214,6 +269,7 @@ if __name__ == "__main__":
     trace = run_mcmc(mgr, model)
 
     mcmc_filename = mgr.get_pathname(label=None)
+    mcmc_filename = "test_mcmc_mle-start"  # DEBUG
     iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
 
 
