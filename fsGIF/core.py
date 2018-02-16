@@ -161,6 +161,10 @@ class RunMgr:
                                  help="If passed, force the recalculation of data. If a result file "
                                  "matching the given parameters is found, a number is appended to it, "
                                  "allowing the new data to take the expected filename.")
+        self.parser.add_argument('--debug', action='store_true',
+                                 help="Indicate that this is a debug run. All file output is "
+                                 "redirected to the current directory instead of being nested "
+                                 "under a 'label' directory. 'subdir' is ignored.")
         self._mgr_argnames = ['parameters', 'recalculate']
             # This list is used to distinguish internally defined parameters from those
             # a calling script might add
