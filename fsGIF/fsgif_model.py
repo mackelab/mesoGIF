@@ -151,6 +151,11 @@ class GIF_spiking(models.Model):
             avoid overwriting the connectivity. If an ndarray, that array will be used directly
             to set connectivity, ignoring model parameters. Default is True.
         """
+        # FIXME
+        if homo and initializer == 'stationary':
+            raise NotImplementedError("Stationary initialization doesn't work with heterogeneous "
+                                      "populations yet. Reason: "
+                                      "`τmT = self.params.τ_m.flatten()[:, np.newaxis]` line")
 
         self._refhist = spike_history
         self.s = spike_history
