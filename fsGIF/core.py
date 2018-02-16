@@ -46,6 +46,11 @@ from fsGIF.fsgif_model import GIF_spiking
 #import os
 #os.environ['THEANO_FLAGS'] = "compiledir=theano_compile"
 
+ml.parameters._filename_printoptions['legacy'] = '1.13'
+    # Allow files created with Numpy v1.13 to be loaded with v1.14
+ml.parameters._remove_whitespace_for_filenames = False
+    # Maintain compability with existing file names
+
 logger = logging.getLogger('fsgif')
 logger.setLevel(logging.DEBUG)
 def init_logging_handlers():
