@@ -128,9 +128,9 @@ if __name__ == "__main__":
     #parser = core.argparse.ArgumentParser(description="Generate activity")
     #params, flags = core.load_parameters(parser)
     mgr = core.RunMgr(description="Sweep loglikelihood", calc='logL_sweep')
-    mgr.parser.add_argument('--debug', action='store_true',
-                            help="Indicate to run in debug mode: disables checking for "
-                            "precomputed data and does not save the result.")
+    # mgr.parser.add_argument('--debug', action='store_true',
+    #                         help="Indicate to run in debug mode: disables checking for "
+    #                         "precomputed data and does not save the result.")
     mgr.load_parameters()
     posparams = mgr.params.posterior
     sweepparams = mgr.params
