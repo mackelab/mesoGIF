@@ -374,5 +374,8 @@ if __name__ == "__main__":
     sgd, n_iterations = do_gradient_descent(mgr)
 
     if sgd is not None:
-        output_filename = get_sgd_pathname(mgr, n_iterations, label=None)
+        if mgr.args.debug:
+            output_filename = 'gd_debug.npr'
+        else:
+            output_filename = get_sgd_pathname(mgr, n_iterations, label=None)
         ml.iotools.save(output_filename, sgd)
