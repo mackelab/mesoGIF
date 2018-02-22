@@ -213,10 +213,11 @@ else:
         param_paths = mackelab.parameters.expand_param_file(
             params, tmpparam_path, max_files=max_tasks)
 
-        # We need to generate our own label, as Sumatra's default is to use a timestamp
-        # which is precise up to seconds. Thus jobs launched simultaneously would have the
-        # same label. To avoid this, we generate our own label by appending a run-specific
-        # number to the default time stamp label
+        # Generate our own label
+        # Sumatra's default is to use a timestamp which is only precise up to seconds.
+        # Thus jobs launched simultaneously would have the same label.
+        # To avoid this, we generate our own label by appending a run-specific
+        # number to the default timestamp label
 
         # Generate a timestamp label same as Sumatra's default
         timestamp = datetime.now()
@@ -229,7 +230,7 @@ else:
         if dry_run:
             # Dry-run
             print("With these arguments, the following calls would "
-                  "distributed between {} processe{}:"
+                  "be distributed between {} processe{}:"
                   .format(cores, '' if cores == 1 else 's'))
             for argv in argv_list:
                 print("smt run " + argv)
