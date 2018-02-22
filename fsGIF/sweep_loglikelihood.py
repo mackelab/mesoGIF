@@ -105,6 +105,10 @@ def sweep_loglikelihood(model, calc_params, output_filename):
     # Compute the likelihood
     if mgr.args.debug:
         output_filename = None
+    n1, n2 = len(param1_stops.stops), len(param2_stops.stops)
+    logger.info("Beginning sweep along parameters {} and {}. "
+                "Sweep grid contains {} x {} = {} points."
+                .format(param1.name, param2.name, n1, n2, n1*n2))
     t1 = time.perf_counter()
     loglikelihood = param_sweep.do_sweep(output_filename, debug=False)
             # This can take a long time
