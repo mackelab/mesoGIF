@@ -61,9 +61,15 @@ if __name__ == "__main__":
         mgr.load(activity_filename, cls=Series.from_raw)
     except (core.FileNotFound, core.FileRenamed):
         # Get pathname with run label
-        activity_filename = core.add_extension(mgr.get_pathname(label=None))
+        if mgr.args.debug:
+            activity_filename = "activity_debug.npr"
+            expected_activity_filename = "activity_debug_nbar.npr"
+        else:
+            activity_filename = core.add_extension(mgr.get_pathname(label=None))
+            expected_activity_filename = core.add_extension(mgr.get_pathname(label=None, suffix='nbar'))
         # Create mean-field model and generate activity
         mfmodel = generate_activity(mgr)
         # Save to file
         iotools.save(activity_filename, mfmodel.A, format='npr')
+        iotools.save(expected_activity_filename, mfmodel.nbar, format='npr')
 

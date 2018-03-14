@@ -5,6 +5,9 @@ import simpleeval
 import ast
 import operator as op
 
+import mackelab as ml
+import mackelab.iotools
+
 import theano_shim as shim
 import sinn.history_functions
 
@@ -75,8 +78,11 @@ if __name__ == "__main__":
         mgr.load(pathname)
     except (core.FileNotFound, core.FileRenamed):
         # Get pathname with run label
-        pathname = mgr.get_pathname(label=None)
+        if mgr.args.debug:
+            pathname = "input_debug.npr"
+        else:
+            pathname = mgr.get_pathname(label=None)
         # Generate input
         input_hist = generate_input(mgr)
         # Save to file
-        sinn.iotools.saveraw(pathname, input_hist)
+        ml.iotools.save(pathname, input_hist)

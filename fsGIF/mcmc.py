@@ -272,6 +272,5 @@ if __name__ == "__main__":
         mcmc_filename = "mcmc_debug.dill"
     else:
         mcmc_filename = mgr.get_pathname(label=None)
-    iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
-
+    ml.iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
 
