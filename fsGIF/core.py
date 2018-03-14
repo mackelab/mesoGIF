@@ -21,6 +21,7 @@ import pymc3 as pymc
 import mackelab as ml
 import mackelab.iotools
 import mackelab.parameters
+import mackelab.tqdm
 import theano_shim as shim
 import sinn
 import sinn.iotools as iotools
@@ -59,7 +60,7 @@ def init_logging_handlers():
     fh = logging.handlers.RotatingFileHandler('fsgif_main.log', mode='w', maxBytes=5e5, backupCount=5)
     fh.setLevel(sinn.LoggingLevels.MONITOR)
     fh.setFormatter(sinn.config.logging_formatter)
-    ch = logging.StreamHandler()
+    ch = ml.tqdm.LoggingStreamHandler()
     ch.setLevel(logging.INFO)
     ch.setFormatter(sinn.config.logging_formatter)
     logger.addHandler(fh)

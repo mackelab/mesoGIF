@@ -1,3 +1,6 @@
+* DONE Show tqdm progress bar when using Sumatra
+  CLOSED: [2018-03-14 Wed 15:43]
+* Make sure that interrupting PyMC3 still recovers the current chain, when using Sumatra
 * [fsgif_model] Combine the "statevars" with the State namedtuple
 * [fsgif_model] Remove the N factor from θtilde_dis
 * [fsgif_model] Stationary initializer for microscopic model
