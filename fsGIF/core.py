@@ -10,6 +10,7 @@ import sys
 import argparse
 import time
 import copy
+import itertools
 import hashlib
 import inspect
 import numpy as np
@@ -30,6 +31,9 @@ from sinn.analyze.heatmap import HeatMap
 
 from parameters import ParameterSet
 from fsGIF.fsgif_model import GIF_spiking
+
+import mackelab as ml
+import mackelab.utils
 
 # try:
 #     import matplotlib.pyplot as plt
@@ -442,6 +446,147 @@ class RunMgr:
         #             # otherwise they would be casted to a single type
         #         params[name] = np.array(val)
         # return ParameterSet(params)
+
+def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
+                  descriptions=None, long_descriptions=None):
+    """
+    Construct the 1D and 2D marginals for MCMC traces
+
+    Parameters
+    ---------------
+    traces: PyMC3 MultiTrace
+        The MCMC trace or traces for which we want to compute marginals.
+    posterior_desc: ParameterSet
+        Posterior parameters used for the MCMC trace.
+    varnames: list of tuples
+        List of tuple pairs (trace_name, posterior_name), associating
+        names of the variables in traces to those in the posterior desc.
+        If not specified, `get_marginals()` will try to associate them itself.
+    displaynames: dict or ParameterSet
+        keys: model names
+        values: nested lists or array of display names, of same shape as the
+            variable corresponding to the key.
+        'model name' refers to the name of an untransformed variable, as defined
+        in `posterior_desc`.
+        A 'display name' is the name that will be used as an axis label. Each
+        display name must be unique, as they also used as a handle to refer to
+        particular variable components.
+        If not specified, the model names are combined with a component index
+        to create a unique label/key for each axis.
+    descriptions: dict or ParameterSet
+        Same format as `displaynames`. May be used to store additional free
+        form text, which can retrieved with the parameters' `desc` attribute.
+    long_descriptions: dict or ParameterSet
+        Allows saving a second free form string, like `shortdesc`. Stored
+        in the parameters' `longdesc` attribute.
+    """
+    ParamDim = sinn.analyze.heatmap.MarginalCollection.ParamDim
+    idx_filter = "0123456789," #When reconstructing index, only these characters are kept
+    prior_desc = posterior_desc.model.prior
+    masks = posterior_desc.mask
+    varnames = dict(varnames) if varnames is not None else {}
+    if displaynames is None:
+        displaynames = {}
+    else:
+        displaynames = displaynames.copy()
+    if descriptions is None:
+        descriptions = {}
+    else:
+        descriptions = descriptions.copy()
+    if long_descriptions is None:
+        long_descriptions = {}
+    else:
+        long_descriptions = long_descriptions.copy()
+
+    def get_trace_name(varname, idx):
+        # Use the provided mapping if it is available
+        search_name = varnames.get(varname, varname)
+        # Find all traces with matching name
+        candidate_names = [name for name in traces.varnames
+                           if search_name in name]
+        # Find the one with matching index
+        if len(candidate_names) == 0:
+            raise ValueError("'{}' does not match any trace variable. (searched for '{}')"
+                             .format(varname, search_name))
+        elif len(candidate_names) == 1:
+            # TODO: Check that there is no index ?
+            return candidate_names[0]
+        else:
+            for candidate in candidate_names:
+                start = candidate.find(search_name)
+                suffix = candidate[start+len(search_name):]
+                idx_str = "(" + ''.join(c for c in suffix if c in idx_filter) + ")"
+                    # Standardize by stripping anything that isn't a number or a comma
+                if idx == type(idx)(idx_str):
+                    return candidate
+            raise RuntimeError("No trace of variable '{}' (searched '{}') corresponds to index '{}'"
+                               .format(varname, search_name, idx_str))
+
+    # Construct a flat list of all the parameters
+    #   - Parameters with multiple components appear multiple times
+    #   - Accompanied by a flat_idcs list which distinguishes components.
+    #     Indices in flat_idcs refer to the column index in the MultiTrace, so
+    #     parameters can be retrieved as `traces.paramname[idx]`
+    flat_params = ml.utils.SanitizedOrderedDict(sanitize=['log_{10}', '\\', '{', '}', '$', ])
+        # substrings will be stripped in order, for e.g. 'log_{10}' should come before '{' or '}'
+    for varname in posterior_desc.variables:
+        if not any(varname in tracename for tracename in traces.varnames):
+            # There are no traces for this parameter
+            continue
+        # Get model, transformed and trace variable names, which may or may not differ
+        if hasattr(prior_desc[varname], 'transform'):
+            modelname, transformedname = [name.strip()
+                  for name in prior_desc[varname].transform.name.split('->')]
+            assert(modelname == varname)
+            to_desc = prior_desc[varname].transform.to
+            back_desc = prior_desc[varname].transform.back
+        else:
+            modelname = transformedname = varname
+            to_desc = None
+            back_desc = None
+        # Get mask
+        mask = (np.ones(np.asarray(posterior_desc.model.params[modelname]).shape)
+                * np.array(masks[varname])).astype(bool)
+            # If necessary, broadcast mask to the variable's full size
+        # Construct a flat list of parameters
+        if np.any(mask):
+            idcs = list(itertools.product(*(range(s) for s in mask.shape)))
+            # Set the display name
+            if modelname not in displaynames:
+                displaynames[modelname] = np.array([modelname + str(idx) for idx in idcs]
+                                                  ).reshape(mask.shape)
+            else:
+                # Ensure that we can index the display names with array indices
+                dnames = np.array(displaynames[modelname])
+                displaynames[modelname] = dnames[mask.reshape(dnames.shape)].flatten()
+            # Normalize the descriptions
+            if modelname not in descriptions:
+                descriptions[modelname] = [""]*len(idcs)
+            else:
+                descs = np.array(descriptions[modelname])
+                descriptions[modelname] = descs[mask.reshape(descs.shape)].flatten()
+            if modelname not in long_descriptions:
+                long_descriptions[modelname] = [""]*len(idcs)
+            else:
+                ldescs = np.array(long_descriptions[modelname])
+                long_descriptions[modelname] = ldescs[mask.reshape(ldescs.shape)].flatten()
+            flatidcs = range(np.prod(mask.shape)) # Indices to the flattened array
+            for idx, flatidx, displayname, desc, longdesc in zip(
+                  idcs, flatidcs, displaynames[modelname],
+                  descriptions[modelname], long_descriptions[modelname]):
+                if mask[idx]:
+                    assert(displayname not in flat_params)
+                        # Ensure display names are unique
+                    flat_params[displayname] = ParamDim(
+                          varname,
+                          transformedname,
+                          get_trace_name(transformedname, idx),
+                          displayname, desc, longdesc,
+                          idx, flatidx,
+                          to_desc,
+                          back_desc)
+
+    return flat_params
 
 def _split_number(s):
     """
