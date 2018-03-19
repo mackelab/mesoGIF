@@ -527,7 +527,7 @@ def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
     #   - Accompanied by a flat_idcs list which distinguishes components.
     #     Indices in flat_idcs refer to the column index in the MultiTrace, so
     #     parameters can be retrieved as `traces.paramname[idx]`
-    flat_params = ml.utils.SanitizedOrderedDict(sanitize=['log_{10}', '\\', '{', '}', '$', ])
+    flat_params = ml.utils.SanitizedOrderedDict(sanitize=['{', '}', '$', ',', '_'])
         # substrings will be stripped in order, for e.g. 'log_{10}' should come before '{' or '}'
     for varname in posterior_desc.variables:
         if not any(varname in tracename for tracename in traces.varnames):

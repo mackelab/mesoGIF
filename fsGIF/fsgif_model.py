@@ -588,7 +588,14 @@ class GIF_mean_field(models.Model):
         models.Model.same_dt(self.A, self.I_ext)
         models.Model.output_rng(self.A, self.rndstream)
 
-        super().__init__(params)
+        # Create the reference history
+        # TODO: Will this still work when `nbar` is made a temporary ?
+        # We use nbar because it is either the latest in the dependency cycle (if A is given)
+        # or second latest (if A is not given)
+        self.nbar = Series(self.A, 'nbar', use_theano=False)
+
+        # Run the base class initialization
+        super().__init__(params, reference_history=self.nbar)
         # NOTE: Do not use `params` beyond here. Always use self.params.
 
         N = self.params.N.get_value()
@@ -634,9 +641,8 @@ class GIF_mean_field(models.Model):
         self.λ = Series(self.u, 'λ', use_theano=shim.config.use_theano)
 
         # Temporary variables
-        self.nbar = Series(self.n, 'nbar', use_theano=False)
+        #self.nbar = Series(self.n, 'nbar', use_theano=False)
         self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), use_theano=False)
-        #self.A_Δ.pad(1)  # +1 HACK (safety)
         #self.g = Series(self.A, 'g', shape=(self.Npops, self.Nθ,))
         self.g = Series(self.A, 'g', shape=(self.Npops,), use_theano=shim.config.use_theano)  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
 
@@ -835,18 +841,6 @@ class GIF_mean_field(models.Model):
         self.A_Δ._original_tidx.set_value(self.A_Δ._cur_tidx.eval())
         self.A_Δ._cur_tidx = self.A_Δ._original_tidx
         self.A_Δ.lock()
-
-    def get_t_idx(self, t, allow_rounding=False):
-        """
-        Returns the time index corresponding to t, with 0 corresponding to t0.
-        """
-        if shim.istype(t, 'int'):
-            return t
-        else:
-            return self.A.get_t_idx(t, allow_rounding) - self.A.t0idx
-    def index_interval(self, Δt, allow_rounding=False):
-        return self.A.index_interval(Δt, allow_rounding)
-
 
     def get_memory_time(self, kernel, max_time=10):
         """
