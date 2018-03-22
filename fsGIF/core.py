@@ -448,9 +448,14 @@ class RunMgr:
         # return ParameterSet(params)
 
 def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
-                  descriptions=None, long_descriptions=None):
+                     descriptions=None, long_descriptions=None,
+                     key_sanitizer="${},_"):
     """
-    Construct the 1D and 2D marginals for MCMC traces
+    Construct the list of parameters for 1D and 2D marginals from MCMC traces,
+    by flattening the parameters in those traces into a single 1D list suitable
+    for iteration.
+    Returns a SanitizedOrderedDict of ParamDim's; use of sanitization allows for
+    "close enough" indexing.
 
     Parameters
     ---------------
@@ -479,6 +484,14 @@ def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
     long_descriptions: dict or ParameterSet
         Allows saving a second free form string, like `shortdesc`. Stored
         in the parameters' `longdesc` attribute.
+    key_sanitizer: function, or list of characters
+        Passed on to intializer of ml.utils.SanitizedOrderedDict.
+
+    Returns
+    -------
+    SanitizedOrderedDict
+        keys: Sanitized display names
+        values: ParamDim instance
     """
     ParamDim = sinn.analyze.heatmap.MarginalCollection.ParamDim
     idx_filter = "0123456789," #When reconstructing index, only these characters are kept
@@ -527,7 +540,7 @@ def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
     #   - Accompanied by a flat_idcs list which distinguishes components.
     #     Indices in flat_idcs refer to the column index in the MultiTrace, so
     #     parameters can be retrieved as `traces.paramname[idx]`
-    flat_params = ml.utils.SanitizedOrderedDict(sanitize=['{', '}', '$', ',', '_'])
+    flat_params = ml.utils.SanitizedOrderedDict(sanitize=key_sanitizer)
         # substrings will be stripped in order, for e.g. 'log_{10}' should come before '{' or '}'
     for varname in posterior_desc.variables:
         if not any(varname in tracename for tracename in traces.varnames):
