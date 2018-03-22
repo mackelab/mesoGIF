@@ -1,5 +1,6 @@
 import sys
 import time
+import logging
 from collections import Iterable
 import numpy as np
 
@@ -72,10 +73,10 @@ def sweep_loglikelihood(model, calc_params, output_filename):
         model.theano_reset()
         def logL_fn_wrapper(model):
             model.clear_unlocked_histories()
-            logger.info("Computing state variable traces...")
+            #logger.info("Computing state variable traces...")
             model.init_latent_vars(calc_params.posterior.model.initializer)
             model.advance(burnin_idx)
-            logger.info("Computing log likelihood...")
+            #logger.info("Computing log likelihood...")
             return logL_fn(burnin_idx)
     else:
         def logL_fn_wrapper(model):
@@ -109,11 +110,15 @@ def sweep_loglikelihood(model, calc_params, output_filename):
     logger.info("Beginning sweep along parameters {} and {}. "
                 "Sweep grid contains {} x {} = {} points."
                 .format(param1.name, param2.name, n1, n2, n1*n2))
+    loglevel = logging.getLogger().level
+    logging.getLogger().setLevel(logging.WARNING)
+        # Turn off logging spam during the sweep – we have a progress bar now
     t1 = time.perf_counter()
     loglikelihood = param_sweep.do_sweep(output_filename, debug=False)
-            # This can take a long time
-            # The result will be saved in output_filename
+        # This can take a long time
+        # The result will be saved in output_filename
     t2 = time.perf_counter()
+    logging.getLogger().setLevel(loglevel)
     logger.info("Calculation of the likelihood took {}s."
                 .format((t2-t1)))
 
