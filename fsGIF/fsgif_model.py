@@ -157,7 +157,6 @@ class GIF_spiking(models.Model):
                                       "populations yet. Reason: "
                                       "`τmT = self.params.τ_m.flatten()[:, np.newaxis]` line")
 
-        self._refhist = spike_history
         self.s = spike_history
         self.I_ext = input_history
         self.rndstream = random_stream
@@ -170,7 +169,7 @@ class GIF_spiking(models.Model):
         models.Model.same_dt(self.s, self.I_ext)
         models.Model.output_rng(self.s, self.rndstream)
 
-        super().__init__(params)
+        super().__init__(params, reference_history=self.s)
         # NOTE: Do not use `params` beyond here. Always use self.params.
         self.params = self.params._replace(
             **{name: self.s.PopTerm(getattr(self.params, name)) for name in params._fields})
@@ -575,7 +574,6 @@ class GIF_mean_field(models.Model):
     def __init__(self, params, activity_history, input_history,
                  initializer='stationary', random_stream=None, memory_time=None):
 
-        self._refhist = activity_history
         self.A = activity_history
         self.I_ext = input_history
         self.rndstream = random_stream

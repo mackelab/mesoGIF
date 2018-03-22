@@ -32,7 +32,6 @@ def generate_spikes(mgr):
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
-    logger.info("Generating new spike data...")
     #Ihist = iotools.loadraw(mgr.get_pathname(params.input))
     # Ihist = mgr.load(input_filename,
     #                  calc='input',
@@ -73,8 +72,8 @@ def generate_spikes(mgr):
     #shist.set_connectivity(w)
 
     # Generate the spikes
+    logger.info("Generating new spike data...")
     shist.set()
-
     logger.info("Done.")
 
     # Reload Theano if it was loaded when we entered the function
