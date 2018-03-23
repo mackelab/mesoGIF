@@ -136,12 +136,13 @@ class RunMgr:
     data_dir = "data"
     label_dir = "run_dump"
     subdirs = {
-        'input'     : "inputs",
-        'spikes'    : "spikes",
-        'activity'  : "activity",
-        'logL_sweep': "likelihood",
-        'sgd'       : "fits",
-        'mcmc'      : "mcmc_nosync",
+        'input'      : "inputs",
+        'spikes'     : "spikes",
+        'activity'   : "activity",
+        'spike_nbar' : "spike_nbar",
+        'logL_sweep' : "likelihood",
+        'sgd'        : "fits",
+        'mcmc'       : "mcmc_nosync",
         }
     smtlabel = 'cmdline'
         # Either 'cmdline' or None. 'parameters' not currently supported
@@ -175,9 +176,17 @@ class RunMgr:
                                  help="Indicate that this is a debug run. All file output is "
                                  "redirected to the current directory instead of being nested "
                                  "under a 'label' directory. 'subdir' is ignored.")
+        # self.parser.add_argument("--threadidx", type=int,
+        #                          help="If running multiple versions of a script in parallel, "
+        #                          "provide to each a different process/thread index. Scripts "
+        #                          "may use this information to e.g. display separate progress "
+        #                          "bars, or log to separate files.")
         self._mgr_argnames = ['parameters', 'recalculate']
             # This list is used to distinguish internally defined parameters from those
             # a calling script might add
+            # Specified parameters are removed from 'args' before returning to the calling
+            # script, so don't include parameters that should be accessible by it.
+            # 'parameters' is an illegal key in a ParameterSet, so it must be removed.
 
         #self.parser.add_argument('--label', type=str,
         #                         help="Label parameter, automatically provided by Sumatra.",
