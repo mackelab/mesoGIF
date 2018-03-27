@@ -109,17 +109,38 @@ if __name__ == "__main__":
                 #   the derived data is NOT renamed
     if generate_data:
         # Get new filenames with the run label
-        spike_filename = core.add_extension(mgr.get_pathname(label=None))
-        spike_activity_filename = core.add_extension(mgr.get_pathname(suffix='activity', label=None))
+        if mgr.args.debug:
+            spike_filename = "shist_debug.npr"
+            spike_activity_filename = "shist_activity_debug.npr"
+            spike_a_filename = "shist_E_activity_debug.npr"
+        else:
+            spike_filename = core.add_extension(mgr.get_pathname(label=None))
+            spike_activity_filename = core.add_extension(mgr.get_pathname(suffix='activity', label=None))
+            spike_a_filename = core.add_extension(mgr.get_pathname(suffix='expected_activity', label=None))
 
         # Generate spikes
-        shist = generate_spikes(mgr).s
+        model = generate_spikes(mgr)
+        shist = model.s
 
         # Save to file
         iotools.save(spike_filename, shist, format='npr')
 
         # Compute the associated activity trace
-        logger.info("Computing activity from spike data")
+        logger.debug("Computing activity from spike data")
         Ahist = core.compute_spike_activity(shist)
         iotools.save(spike_activity_filename, Ahist, format='npr')
+
+        # Compute the expected activity (i.e. effective firing rate)
+        logger.debug("Computing effective firing rate from spike data")
+        ahist = Series(Ahist, iterative=False)
+        slcs = shist.pop_slices
+        def afunc(t):
+            λ = np.array(model.λ[t])
+            a = np.empty(λ.shape[:-1] + shist.shape)
+            for i, slc in enumerate(shist.pop_slices):
+                a[..., i] = λ[..., slc].mean(axis=-1)
+            return a
+        ahist.set_update_function(afunc)
+        ahist.set()
+        iotools.save(spike_a_filename, ahist, format='npr')
 
