@@ -136,7 +136,7 @@ if __name__ == "__main__":
         slcs = shist.pop_slices
         def afunc(t):
             λ = np.array(model.λ[t])
-            a = np.empty(λ.shape[:-1] + shist.shape)
+            a = np.empty(λ.shape[:-1] + ahist.shape)
             for i, slc in enumerate(shist.pop_slices):
                 a[..., i] = λ[..., slc].mean(axis=-1)
             return a
