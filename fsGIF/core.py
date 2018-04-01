@@ -576,22 +576,25 @@ def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
             # Set the display name
             if modelname not in displaynames:
                 displaynames[modelname] = np.array([modelname + str(idx) for idx in idcs]
-                                                  ).reshape(mask.shape)
+                                                  )
             else:
                 # Ensure that we can index the display names with array indices
-                dnames = np.array(displaynames[modelname])
-                displaynames[modelname] = dnames[mask.reshape(dnames.shape)].flatten()
+                # dnames = np.array(displaynames[modelname])
+                # displaynames[modelname] = dnames[mask.reshape(dnames.shape)].flatten()
+                displaynames[modelname] = np.array(displaynames[modelname]).flatten()
             # Normalize the descriptions
             if modelname not in descriptions:
                 descriptions[modelname] = [""]*len(idcs)
             else:
-                descs = np.array(descriptions[modelname])
-                descriptions[modelname] = descs[mask.reshape(descs.shape)].flatten()
+                # descs = np.array(descriptions[modelname])
+                # descriptions[modelname] = descs[mask.reshape(descs.shape)].flatten()
+                descriptions[modelname] = np.array(descriptions[modelname]).flatten()
             if modelname not in long_descriptions:
                 long_descriptions[modelname] = [""]*len(idcs)
             else:
-                ldescs = np.array(long_descriptions[modelname])
-                long_descriptions[modelname] = ldescs[mask.reshape(ldescs.shape)].flatten()
+                # ldescs = np.array(long_descriptions[modelname])
+                # long_descriptions[modelname] = ldescs[mask.reshape(ldescs.shape)].flatten()
+                long_descriptions[modelname] = np.array(long_descriptions[modelname]).flatten()
             flatidcs = range(np.prod(mask.shape)) # Indices to the flattened array
             for idx, flatidx, displayname, desc, longdesc in zip(
                   idcs, flatidcs, displaynames[modelname],
