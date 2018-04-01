@@ -148,9 +148,9 @@ def get_sgd(mgr, check_previous_runs=True):
             cost_format = 'logL',
             optimizer = mgr.params.optimizer,
             model = model,
-            start = mgr.params.start,
-            datalen = mgr.params.datalen,
-            burnin = mgr.params.burnin,
+            start = mgr.params.posterior.burnin,
+            datalen = mgr.params.posterior.datalen,
+            burnin = mgr.params.batch_burnin,
             mbatch_size = mgr.params.batch_size
         )
         sgd.set_fitparams(fitmask)
