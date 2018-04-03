@@ -677,9 +677,7 @@ class GIF_mean_field(models.Model):
         self.init_kernels()
 
         # Initialize the variables
-        if self.A._original_tidx.get_value() < self.A.t0idx:
-            self.init_observed_vars(initializer)
-        self.init_latent_vars()
+        self.initialize(initializer)
 
         self.set_refractory_mask()
             # FIXME: Make dependence on t_ref symbolic - at present can't update t_ref
@@ -894,8 +892,41 @@ class GIF_mean_field(models.Model):
         self.θtilde_dis.locked = True
         # <<<<<
 
+    def initialize(self, initializer='stationary', t=None):
+        """
+        Parameters
+        ----------
+        initializer: str
+            One of
+              - 'stationary': (Default) Stationary state under no input conditions.
+              - 'silent': The last firing time of each neuron is set to -∞. Very artificial
+                condition, that may require a long burnin time to remove the transient.
 
-    def init_observed_vars(self, initializer='stationary'):
+        t: int | float
+            Time at which we want to start the model. It will be intialized at the
+            the time bin just before this point.
+
+        TODO: Call this every time the model is updated
+        """
+
+        # TODO: Change latent -> RV to match pymc3 ?
+        # Compute initial state
+        if initializer == 'stationary':
+            observed_state = self.get_stationary_activity(self, self.K, self.θ_dis, self.θtilde_dis)
+            latent_state = self.get_stationary_state(observed_state)
+                # TODO: Rename to 'get_stationary_latents'
+        elif initializer == 'silent':
+            observed_state = np.zeros(self.A.shape)
+            latent_state = self.get_silent_state()
+        else:
+            raise ValueError("Initializer string must be one of 'stationary', 'silent'")
+
+        # Set the variables to the initial state
+        if self.A._original_tidx.get_value() < self.A.t0idx:
+            self.init_observed_vars(observed_state, t)
+        self.init_latent_vars(latent_state, t)
+
+    def init_observed_vars(self, init_A, t=None):
         """
         Originally based on InitPopulations (p. 52)
 
@@ -907,22 +938,43 @@ class GIF_mean_field(models.Model):
               - 'silent': The last firing time of each neuron is set to -∞. Very artificial
                 condition, that may require a long burnin time to remove the transient.
 
+        t: int | float
+            Time at which we want to start the model. It will be intialized at the
+            the time bin just before this point.
+
         TODO: Call this every time the model is updated
         """
         # TODO: Use generic LatentState._fields; use 'get_stationary_observed'
 
-        if initializer == 'stationary':
-            init_A = self.get_stationary_activity(self, self.K, self.θ_dis, self.θtilde_dis)
-        elif initializer == 'silent':
-            init_A = np.zeros(self.A.shape)
+        # Note that A is initialized w/ :tidx, so up to tidx-1
+        if t is None:
+            tidx = self.A.t0idx
         else:
-            raise ValueError("Initializer string must be one of 'stationary', 'silent'")
+            tidx = self.A.get_t_idx(t)
+            assert(t >= 1)
 
         data = self.A._data.get_value(borrow=True)
-        data[:self.A.t0idx,:] = init_A
+        data[:tidx,:] = init_A
         self.A._data.set_value(data, borrow=True)
+        self.A._cur_tidx.set_value(tidx - 1)
+        self.A._original_tidx = self.A._cur_tidx
 
-    def init_latent_vars(self, initializer='stationary'):
+    def init_latent_vars(self, init_state, t=None):
+        """
+        Parameters
+        ----------
+        initializer: str
+            One of
+              - 'stationary': (Default) Stationary state under no input conditions.
+              - 'silent': The last firing time of each neuron is set to -∞. Very artificial
+                condition, that may require a long burnin time to remove the transient.
+
+        t: int | float
+            Time at which we want to start the model. It will be intialized at the
+            the time bin just before this point.
+
+        TODO: Call this every time the model is updated
+        """
 
         # FIXME: Initialize series' to 0
 
@@ -931,16 +983,6 @@ class GIF_mean_field(models.Model):
             if hist._original_tidx.get_value() < hist.t0idx - 1:
                 raise RuntimeError("You must initialize the observed histories before the latents.")
 
-        # ====================
-        # Initialize state variables
-        if initializer == 'stationary':
-            init_A = self.get_stationary_activity(self, self.K, self.θ_dis, self.θtilde_dis)
-            init_state = self.get_stationary_state(init_A)
-                # TODO: Rename to 'get_stationary_latents'
-        elif initializer == 'silent':
-            init_state = self.get_silent_state()
-        else:
-            raise ValueError("Initializer string must be one of 'stationary', 'silent'")
 
 
         # Set initial values (make sure this is done after all padding is added)
@@ -957,11 +999,15 @@ class GIF_mean_field(models.Model):
             initval = getattr(init_state, varname)
             hist.pad(1)  # Ensure we have at least one bin for the initial value
                 # TODO: Allow longer padding
-            idx = hist.t0idx - 1; assert(idx >= 0)
+            if t is None:
+                tidx = hist.t0idx - 1; assert(tidx >= 0)
+            else:
+                tidx = hist.get_t_idx(t) - 1; assert(tidx >= 0)
             data = hist._data.get_value(borrow=True)
-            data[idx,:] = initval
+            data[tidx,:] = initval
             hist._data.set_value(data, borrow=True)
-
+            hist._cur_tidx.set_value(tidx - 1)
+            hist._original_tidx = hist._cur_tidx
 
         # # Make all neurons free neurons
         # idx = self.x.t0idx - 1; assert(idx >= 0)
@@ -1083,8 +1129,7 @@ class GIF_mean_field(models.Model):
         'docs/Initial_condition.ipynb'
 
         We make this a static method to allow external calls. In particular,
-        this allows us to use this function to use this function in the
-        initialization of GIF_spiking.
+        this allows us to use this function in the initialization of GIF_spiking.
 
         TODO: Use get_η_csts rather than accessing parameters directly.
 
