@@ -458,7 +458,7 @@ class RunMgr:
 
 def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
                      descriptions=None, long_descriptions=None,
-                     key_sanitizer="${},_"):
+                     key_sanitizer="${},_^"):
     """
     Construct the list of parameters for 1D and 2D marginals from MCMC traces,
     by flattening the parameters in those traces into a single 1D list suitable
@@ -525,7 +525,9 @@ def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
         search_name = varnames.get(varname, varname)
         # Find all traces with matching name
         candidate_names = [name for name in traces.varnames
-                           if search_name in name]
+                           if search_name in name
+                           and '__' not in name]
+                           # Variables with '__' are PyMC3-internal transformations
         # Find the one with matching index
         if len(candidate_names) == 0:
             raise ValueError("'{}' does not match any trace variable. (searched for '{}')"
