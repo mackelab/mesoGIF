@@ -142,7 +142,7 @@ def get_pymc_model_new(params, model):
     burnin_idx = model.index_interval(params.burnin)
     def setup():
         model.clear_unlocked_histories()
-        model.init_latent_vars(params.model.initializer)
+        model.initialize(params.model.initializer)
         model.advance(burnin_idx)
 
     with Model(setup=setup) as pymc_model:

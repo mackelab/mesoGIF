@@ -893,6 +893,7 @@ class GIF_mean_field(models.Model):
         # <<<<<
 
     def initialize(self, initializer='stationary', t=None):
+        # TODO: Rename to 'initialize_state()' ?
         """
         Parameters
         ----------
@@ -981,9 +982,8 @@ class GIF_mean_field(models.Model):
         for varname in self.ObservedState._fields:
             hist = getattr(self, varname)
             if hist._original_tidx.get_value() < hist.t0idx - 1:
-                raise RuntimeError("You must initialize the observed histories before the latents.")
-
-
+                raise RuntimeError("You must initialize the observed "
+                                   "histories before the latents.")
 
         # Set initial values (make sure this is done after all padding is added)
 
