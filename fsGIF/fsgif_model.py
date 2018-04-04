@@ -952,7 +952,7 @@ class GIF_mean_field(models.Model):
             tidx = self.A.t0idx
         else:
             tidx = self.A.get_t_idx(t)
-            assert(t >= 1)
+        assert(tidx >= 1)
 
         data = self.A._data.get_value(borrow=True)
         data[:tidx,:] = init_A
@@ -1006,7 +1006,7 @@ class GIF_mean_field(models.Model):
             data = hist._data.get_value(borrow=True)
             data[tidx,:] = initval
             hist._data.set_value(data, borrow=True)
-            hist._cur_tidx.set_value(tidx - 1)
+            hist._cur_tidx.set_value(tidx)
             hist._original_tidx = hist._cur_tidx
 
         # # Make all neurons free neurons
@@ -1427,6 +1427,7 @@ class GIF_mean_field(models.Model):
 
             curtidx = min( hist._original_tidx.get_value() - hist.t0idx
                            for hist in self.statehists )
+            assert(curtidx >= -1)
 
             if curtidx+1 < stopidx:
                 newvals = self._advance_fn(curtidx, stopidx)
