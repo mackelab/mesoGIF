@@ -5,6 +5,7 @@ import mackelab as ml
 from mackelab.pymc3 import PyMCPrior, export_multitrace
 from mackelab.parameters import Transform
 import mackelab.parameters
+import mackelab.theano
 
 from parameters import ParameterSet
 import theano_shim as shim
@@ -264,6 +265,11 @@ if __name__ == "__main__":
     # TODO: mgr.parser.add_argument('--resume' ...
 
     mgr.load_parameters()
+
+    if ml.theano.using_gpu():
+        logger.info("Theano using GPU")
+    else:
+        logger.info("Theano using only CPU")
 
     model = get_model(mgr)
     trace = run_mcmc(mgr, model)
