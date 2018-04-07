@@ -1496,7 +1496,7 @@ class GIF_mean_field(models.Model):
                 statevar_updates = {}
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
-            n = shim.cast(n_full[tidx+t0idx], 'int32')
+            n = n_full[tidx+t0idx]
             #n = shim.cast(self.n[tidx+self.n.t0idx-windowlen:tidx+self.n.t0idx].sum(axis=0), 'int32')
 
             assert(args[0].dtype == config.floatX)
@@ -1517,9 +1517,7 @@ class GIF_mean_field(models.Model):
             outputs_info = [shim.cast(0, sinn.config.floatX)]
 
             # FIXME: Remove once 'n' is in state variables
-            outputs_info.append( shim.cast_int32(self.n._data[startidx + self.n.t0idx - 1]) )
-            #outputs_info.append( self.n._data[startidx + self.n.t0idx - 1] )
-
+            outputs_info.append( self.n._data[startidx + self.n.t0idx - 1] )
 
             for hist in self.statehists:
                 outputs_info.append( hist._data[startidx + hist.t0idx - 1] )
