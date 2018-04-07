@@ -40,9 +40,9 @@ class Kernel_ε(models.ModelKernelMixin, kernels.ExpKernel):
 # The θ kernel is separated in two: θ_1 is the constant equal to ∞ over (0, t_ref)
 # θ_2 is the exponentially decaying adaptation kernel
 class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
-    Parameter_info = OrderedDict( ( ( 'height', config.floatX ),
-                                    ( 'start',  config.floatX ),
-                                    ( 'stop',   config.floatX ) ) )
+    Parameter_info = OrderedDict( ( ( 'height', 'floatX' ),
+                                    ( 'start',  'floatX' ),
+                                    ( 'stop',   'floatX' ) ) )
     Parameters = kernels.com.define_parameters(Parameter_info)
     @staticmethod
     def get_kernel_params(model_params):
@@ -117,23 +117,24 @@ class GIF_spiking(models.Model):
     # consistent with kernel methods which assume inputs which are at least 2d
     # The last two options can be omitted; default flag is 'False'
     # Typically if a parameter will be used inside a kernel, shape_flag should be True.
-    Parameter_info = OrderedDict( (( 'N',      'int32' ),
-                                   ( 'R',      config.floatX ),    # membrane resistance (
-                                   ( 'u_rest', (config.floatX, None, False) ),
-                                   ( 'p',      config.floatX ),   # Connection probability between populations
-                                   ( 'w',      config.floatX ),         # matrix of *population* connectivity strengths
-                                   ( 'Γ',      'int32' ),               # binary connectivity between *neurons*
-                                   ( 'τ_m',    config.floatX  ), # membrane time constant (s)
-                                   ( 't_ref',  config.floatX  ), # absolute refractory period (s)
-                                   ( 'u_th',   config.floatX  ),    # non-adapting threshold (mV)
-                                   ( 'u_r',    config.floatX  ),    # reset potential (mV)
-                                   ( 'c',      config.floatX  ),   # escape rate at threshold (Hz)
-                                   ( 'Δu',     config.floatX  ),    # noise level (mV)
-                                   ( 'Δ',      (config.floatX, None, True)), # transmission delay (s) (kernel ε)
-                                   ( 'τ_s',    (config.floatX, None, True)), # synaptic time constant (mV) (kernel ε)
+    # NOTE: int32 * float32 = float64,  but  int16 * float32 = float32
+    Parameter_info = OrderedDict( (( 'N',      'int16' ),     # Maximum value: 2^16 == 65536
+                                   ( 'R',      'floatX' ),    # membrane resistance (
+                                   ( 'u_rest', ('floatX', None, False) ),
+                                   ( 'p',      'floatX' ),   # Connection probability between populations
+                                   ( 'w',      'floatX' ),         # matrix of *population* connectivity strengths
+                                   ( 'Γ',      'int8' ),               # binary connectivity between *neurons*
+                                   ( 'τ_m',    'floatX'  ), # membrane time constant (s)
+                                   ( 't_ref',  'floatX'  ), # absolute refractory period (s)
+                                   ( 'u_th',   'floatX'  ),    # non-adapting threshold (mV)
+                                   ( 'u_r',    'floatX'  ),    # reset potential (mV)
+                                   ( 'c',      'floatX'  ),   # escape rate at threshold (Hz)
+                                   ( 'Δu',     'floatX'  ),    # noise level (mV)
+                                   ( 'Δ',      ('floatX', None, True)), # transmission delay (s) (kernel ε)
+                                   ( 'τ_s',    ('floatX', None, True)), # synaptic time constant (mV) (kernel ε)
                                    # Adaptation parameters (θ-kernel dependent)
-                                   ( 'J_θ',    (config.floatX, None, True)), # Integral of adaptation (mV s)
-                                   ( 'τ_θ',    (config.floatX, None, True))
+                                   ( 'J_θ',    ('floatX', None, True)), # Integral of adaptation (mV s)
+                                   ( 'τ_θ',    ('floatX', None, True))
                                    ) )
         # NOTE: `Γ` is typically obtained by calling `make_connectivity` with `N` and `p`.
     Parameters = sinn.define_parameters(Parameter_info)
@@ -234,9 +235,10 @@ class GIF_spiking(models.Model):
         # FIXME Check with GIF_mean_field to see if memory_time could be better / more consistently treated
         if memory_time is None:
             memory_time = 0
-        self.memory_time = max(memory_time,
-                               max( kernel.memory_time
-                                    for kernel in [self.ε, self.θ1, self.θ2] ) )
+        self.memory_time = shim.cast(max(memory_time,
+                                         max( kernel.memory_time
+                                              for kernel in [self.ε, self.θ1, self.θ2] ) ),
+                                     dtype=config.floatX)
         self.K = np.rint( self.memory_time / self.dt ).astype(int)
         self.s.pad(self.memory_time)
         # Pad because these are ODEs (need initial condition)
@@ -629,7 +631,7 @@ class GIF_mean_field(models.Model):
                             memory_time=self.memory_time)
 
         # Histories
-        self.n = Series(self.A, 'n', use_theano=shim.config.use_theano)
+        self.n = Series(self.A, 'n', dtype=self.params.N.dtype, use_theano=shim.config.use_theano)
         self.h = Series(self.A, 'h', use_theano=shim.config.use_theano)
         self.h_tot = Series(self.A, 'h_tot', use_theano=False)
         self.u = Series(self.A, 'u', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)
@@ -824,9 +826,13 @@ class GIF_mean_field(models.Model):
         #self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
         self.n.pad(self.A.t0idx)
         self.A.pad(self.n.t0idx)  # Increase whichever has less padding
-        ndata = self.A._data * self.params.N * self.A.dt
+        N = shim.cast(self.params.N, self.A.dtype)
+            # Do cast first to keep multiplication on same type
+            # (otherwise, float32 * int32 => float64)
+        ndata = (self.A._data * N * self.A.dt).eval()
+        assert(sinn.ismultiple(ndata, 1).all()) # Make sure ndata is all integers
         self.n.add_input(self.A)
-        self.n.set(ndata.eval())
+        self.n.set(ndata.astype(self.params.N.dtype))
             # TODO: Don't remove dependence on self.param.N
         self.n.lock()
 
@@ -860,14 +866,14 @@ class GIF_mean_field(models.Model):
         else:
             kernelfn = lambda t: kernel.eval(t)
 
-        T = float(max_time // self.A.dt * self.A.dt)  # make sure T is a multiple of dt
+        T = shim.cast(max_time // self.A.dt64 * self.A.dt64, 'float64')  # make sure T is a multiple of dt
         #while (evalT(kernel.eval(T)) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
-        while (kernelfn(T) < 0.1 * self.Δ_idx).all() and T > self.A.dt:
-            T -= self.A.dt
+        while (kernelfn(T) < 0.1 * self.Δ_idx).all() and T > self.A.dt64:
+            T -= self.A.dt64
 
         T = max(T, 5*self.params.τ_m.get_value().max(), self.A.dt)
         K = self.index_interval(T, allow_rounding=True)
-        return T, K
+        return shim.cast(T,config.floatX), K
 
     def init_kernels(self):
         if not hasattr(self, 'θ_dis'):
@@ -1038,7 +1044,7 @@ class GIF_mean_field(models.Model):
         # Create the refractory mask
         # This mask is zero for time bins within the refractory period,
         # such that it can be multiplied element-wise with arrays of length K
-        self.ref_mask = np.ones(self.u.shape)
+        self.ref_mask = np.ones(self.u.shape, dtype=np.int8)
         for l in range(self.ref_mask.shape[0]):
             # Loop over lags. l=0 corresponds to t-Δt, l=1 to t-2Δt, etc.
             for α in range(self.ref_mask.shape[1]):
@@ -1077,8 +1083,9 @@ class GIF_mean_field(models.Model):
                        iterative = False)
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(
-            lambda t: sum( kernel.eval(t) for kernel in θ ) )
-        # HACK Currently we only support updating by one histories timestep
+            lambda t: np.sum( (kernel.eval(t) for kernel in θ),
+                              dtype=config.floatX ) )
+        # HACK Currently we only support updating by one history timestep
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
         θ_dis.set()
@@ -1471,7 +1478,7 @@ class GIF_mean_field(models.Model):
             n_full = self.n
             t0idx = self.n.t0idx
         else:
-            n_full = data
+            n_full = data.astype(self.params.N.dtype)
             t0idx = 0 # No offset if we provide data
 
         # Windowed test
@@ -1492,10 +1499,11 @@ class GIF_mean_field(models.Model):
             n = shim.cast(n_full[tidx+t0idx], 'int32')
             #n = shim.cast(self.n[tidx+self.n.t0idx-windowlen:tidx+self.n.t0idx].sum(axis=0), 'int32')
 
+            assert(args[0].dtype == config.floatX)
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
                                    + n*shim.log(p)
                                    + (N-n)*shim.log(1-p)
-                                  ).sum()
+                                  ).sum(dtype=config.floatX)
 
             return [cum_logL] + [n] + list(statevar_updates.values()), {}
             # FIXME: Remove [n] once it is included in state vars
@@ -1526,7 +1534,6 @@ class GIF_mean_field(models.Model):
                 outputs[0] = [outputs[0]]
 
             else:
-                # FIXME np.float64 -> shim.floatX or sinn.floatX
                 outputs, upds = shim.gettheano().scan(logLstep,
                                                       sequences = shim.getT().arange(startidx, stopidx),
                                                       outputs_info = outputs_info)
@@ -1885,7 +1892,7 @@ class GIF_mean_field(models.Model):
                           + ( ( self.params.τ_s * red_factor_τs * ( yt - self.A_Δ[tidx+self.A_Δ.t0idx] )
                                 - red_factor_τmT * (self.params.τ_s * yt - τ_mα * self.A_Δ[tidx+self.A_Δ.t0idx]) )
                               / (self.params.τ_s - τ_mα) ) )
-                   ).sum(axis=-1) )
+                   ).sum(axis=-1, dtype=config.floatX) )
 
         # ht
         red_factor = shim.exp(-self.h.dt/self.params.τ_m.flatten() )
@@ -1901,7 +1908,8 @@ class GIF_mean_field(models.Model):
         # gt
         red_factor = shim.exp(- self.g.dt/self.params.τ_θ)
         gt = ( g0 * red_factor
-                 + (1 - red_factor) * self.n._data[tidx_n-self.K] / (self.params.N * self.g.dt)
+                 + (1 - red_factor) * self.n._data[tidx_n-self.K]
+                   / (self.params.N * self.g.dt)
                 ).flatten()
 
         # varθfree
@@ -1926,7 +1934,7 @@ class GIF_mean_field(models.Model):
 
         # P_λt
         λprev = shim.concatenate(
-            ( shim.zeros((1,) + self.λ.shape[1:]),
+            ( shim.zeros((1,) + self.λ.shape[1:], dtype=config.floatX),
               λ0[:-1] ) )
         P_λ_tmp = 0.5 * (λt + λprev) * self.P_λ.dt
         P_λt = shim.switch(P_λ_tmp <= 0.01,

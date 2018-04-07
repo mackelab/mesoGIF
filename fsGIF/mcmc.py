@@ -30,9 +30,12 @@ class ModelSpecificationError(Exception):
     pass
 
 shim.load_theano()
+sinn.config.load_theano()
+    # Synchronizes sinn and theano config, notably the floatX setting
+    # TODO: Move setting of floatX into shim
 shim.gettheano().config.compute_test_value = 'raise'
-sinn.config.floatX = 'float64'
-shim.gettheano().config.floatX = sinn.config.floatX
+#sinn.config.floatX = 'float32'
+#shim.gettheano().config.floatX = sinn.config.floatX
 
 Transform.namespaces.update({'shim': shim})
 
@@ -209,12 +212,14 @@ def get_model(mgr):
                             cls=getattr(histories, postparams.data.type).from_raw,
                             calc='activity',
                             recalculate=False)
+    # TODO: cast data_history to float32 instead of relying on subsample
     data_history = core.subsample(data_history, postparams.model.dt)
 
     input_history = mgr.load(input_filename,
                              cls=getattr(histories, postparams.input.type).from_raw,
                              calc='input',
                              recalculate=False)
+    # TODO: cast input_history to float32 instead of relying on subsample
     input_history = core.subsample(input_history, postparams.model.dt)
 
     model = core.construct_model(gif, postparams.model, data_history, input_history,
