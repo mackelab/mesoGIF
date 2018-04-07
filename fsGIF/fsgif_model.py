@@ -273,7 +273,7 @@ class GIF_spiking(models.Model):
 
         elif initializer == 'silent':
             init_A = np.zeros((len(self.s.pop_slices),))
-            init_state = self.get_silent_state()
+            init_state = self.get_silent_latent_state()
         else:
             raise ValueError("Initializer string must be one of 'stationary', 'silent'")
 
@@ -296,7 +296,7 @@ class GIF_spiking(models.Model):
         #data[:nbins,:] = init_state.s
         #self.s._data.set_value(data, borrow=True)
 
-    def get_silent_state(self):
+    def get_silent_latent_state(self):
         # TODO: include spikes in model state, so we don't need this custom 'Stateplus'
         Stateplus = namedtuple('Stateplus', self.State._fields + ('s',))
         state = Stateplus(
@@ -924,7 +924,7 @@ class GIF_mean_field(models.Model):
                 # TODO: Rename to 'get_stationary_latents'
         elif initializer == 'silent':
             observed_state = np.zeros(self.A.shape)
-            latent_state = self.get_silent_state()
+            latent_state = self.get_silent_latent_state()
         else:
             raise ValueError("Initializer string must be one of 'stationary', 'silent'")
 
@@ -1300,9 +1300,9 @@ class GIF_mean_field(models.Model):
 
         return η
 
-    def get_silent_state(self):
+    def get_silent_latent_state(self):
         K = self.varθ.shape[0]
-        state = self.State(
+        state = self.LatentState(
             h = self.params.u_rest.get_value(),
             #h_tot = np.zeros(self.h_tot.shape),
             u = self.params.u_rest.get_value(),
