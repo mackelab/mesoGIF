@@ -1084,7 +1084,8 @@ class GIF_mean_field(models.Model):
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(
             lambda t: np.sum( (kernel.eval(t) for kernel in θ),
-                              dtype=config.floatX ) )
+                              dtype=config.floatX ).astype(config.floatX) )
+            # If t is float64, specifying dtype inside sum() isn't always enough, so we astype as well
         # HACK Currently we only support updating by one history timestep
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
