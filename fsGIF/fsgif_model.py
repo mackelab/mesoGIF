@@ -1796,7 +1796,9 @@ class GIF_mean_field(models.Model):
         """p.53, lines 30 and 33"""
         return self.rndstream.binomial( size = self.n.shape,
                                         n = self.params.N,
-                                        p = sinn.clip_probabilities(self.nbar[t]/self.params.N) )
+                                        p = sinn.clip_probabilities(self.nbar[t]/self.params.N) ).astype(self.params.N.dtype)
+            # If N.dtype < int64, casting as params.N.dtype allows to reduce the memory footprint
+            # (and n may never be larger than N)
 
     def z_fn(self, t):
         """p.53, line 31"""
