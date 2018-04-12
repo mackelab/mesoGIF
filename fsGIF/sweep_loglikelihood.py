@@ -54,7 +54,9 @@ def sweep_loglikelihood(model, calc_params, output_filename):
     if type(calc_params.posterior.burnin) != type(calc_params.posterior.datalen):
         raise ValueError("The 'burnin' and 'datalen' parameters must be of the same type.")
     burnin_idx = model.get_t_idx(calc_params.posterior.burnin, allow_rounding=True)
-    stop_idx = model.get_t_idx(calc_params.posterior.burnin+calc_params.posterior.datalen, allow_rounding=True)
+    stop_idx = model.get_t_idx(calc_params.posterior.burnin
+                               + calc_params.posterior.datalen, allow_rounding=True)
+    model.default_initializer = calc_params.posterior.model.initializer
 
     if shim.config.use_theano:
         model.theano_reset()
@@ -74,7 +76,7 @@ def sweep_loglikelihood(model, calc_params, output_filename):
         def logL_fn_wrapper(model):
             model.clear_unlocked_histories()
             #logger.info("Computing state variable traces...")
-            model.init_latent_vars(calc_params.posterior.model.initializer)
+            model.initialize(calc_params.posterior.model.initializer)
             model.advance(burnin_idx)
             #logger.info("Computing log likelihood...")
             return logL_fn(burnin_idx)
