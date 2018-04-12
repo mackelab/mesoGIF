@@ -140,9 +140,11 @@ class GIF_spiking(models.Model):
     Parameters = sinn.define_parameters(Parameter_info)
     State = namedtuple('State', ['u', 't_hat'])
 
+    default_initializer = 'stationary'
+
 
     def __init__(self, params, spike_history, input_history,
-                 initializer='stationary', set_weights=True, random_stream=None, memory_time=None):
+                 initializer=None, set_weights=True, random_stream=None, memory_time=None):
         """
         Parameters
         ----------
@@ -262,7 +264,9 @@ class GIF_spiking(models.Model):
         #       (e.g. if we try to calculate t_hat, we will try to get t_hat[t-1],
         #       which is unset)
 
-    def init_state_vars(self, initializer='stationary'):
+    def init_state_vars(self, initializer=None):
+        if initializer is None:
+            initializer = self.default_initializer
 
         if initializer == 'stationary':
             θ_dis, θtilde_dis = GIF_mean_field.discretize_θkernel(
@@ -558,6 +562,8 @@ class GIF_mean_field(models.Model):
     del Parameter_info['Γ']   # Remove the connectivity matrix
     Parameters = sinn.define_parameters(Parameter_info)
 
+    default_initializer = 'stationary'
+
     # 'State' is an irreducible set of variables which uniquely define the model's state.
     # It is subdivided into latent and observed variables.
     LatentState = namedtuple('LatentState',
@@ -574,7 +580,7 @@ class GIF_mean_field(models.Model):
     #statevars = [ 'λfree', 'λ', 'g', 'h', 'u', 'v', 'm', 'x', 'y', 'z' ]
 
     def __init__(self, params, activity_history, input_history,
-                 initializer='stationary', random_stream=None, memory_time=None):
+                 initializer=None, random_stream=None, memory_time=None):
 
         self.A = activity_history
         self.I_ext = input_history
@@ -898,7 +904,7 @@ class GIF_mean_field(models.Model):
         self.θtilde_dis.locked = True
         # <<<<<
 
-    def initialize(self, initializer='stationary', t=None):
+    def initialize(self, initializer=None, t=None):
         # TODO: Rename to 'initialize_state()' ?
         """
         Parameters
@@ -908,6 +914,7 @@ class GIF_mean_field(models.Model):
               - 'stationary': (Default) Stationary state under no input conditions.
               - 'silent': The last firing time of each neuron is set to -∞. Very artificial
                 condition, that may require a long burnin time to remove the transient.
+            If unspecified, uses the value of `self.default_initializer`.
 
         t: int | float
             Time at which we want to start the model. It will be intialized at the
@@ -916,6 +923,8 @@ class GIF_mean_field(models.Model):
         TODO: Call this every time the model is updated
         """
 
+        if initializer is None:
+            initializer = self.default_initializer
         # TODO: Change latent -> RV to match pymc3 ?
         # Compute initial state
         if initializer == 'stationary':
