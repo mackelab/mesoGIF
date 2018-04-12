@@ -176,11 +176,11 @@ class RunMgr:
                                  help="Indicate that this is a debug run. All file output is "
                                  "redirected to the current directory instead of being nested "
                                  "under a 'label' directory. 'subdir' is ignored.")
-        # self.parser.add_argument("--threadidx", type=int,
-        #                          help="If running multiple versions of a script in parallel, "
-        #                          "provide to each a different process/thread index. Scripts "
-        #                          "may use this information to e.g. display separate progress "
-        #                          "bars, or log to separate files.")
+        self.parser.add_argument("--threadidx", type=int, default=0,
+                                 help="If running multiple versions of a script in parallel, "
+                                 "provide to each a different process/thread index. Scripts "
+                                 "may use this information to e.g. display separate progress "
+                                 "bars, or log to separate files.")
         self._mgr_argnames = ['parameters', 'recalculate']
             # This list is used to distinguish internally defined parameters from those
             # a calling script might add
