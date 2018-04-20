@@ -267,6 +267,9 @@ class GIF_spiking(models.Model):
     def init_state_vars(self, initializer=None):
         if initializer is None:
             initializer = self.default_initializer
+        else:
+            # Update default initializer
+            self.default_initializer = initializer
 
         if initializer == 'stationary':
             θ_dis, θtilde_dis = GIF_mean_field.discretize_θkernel(
@@ -925,6 +928,9 @@ class GIF_mean_field(models.Model):
 
         if initializer is None:
             initializer = self.default_initializer
+        else:
+            # Update default initializer
+            self.default_initializer = initializer
         # TODO: Change latent -> RV to match pymc3 ?
         # Compute initial state
         if initializer == 'stationary':
