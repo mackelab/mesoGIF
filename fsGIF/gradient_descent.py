@@ -18,33 +18,35 @@ logger = core.logger
 ############################
 # Model import
 from fsGIF import fsgif_model as gif
+data_dir = "data"
+label_dir = "run_dump"
 ############################
 
-def do_gradient_descent(mgr):
+def do_gradient_descent(params, prev_run=None):
 
     # Create the sgd object
-    sgd = get_sgd(mgr)
+    sgd = get_sgd_new(params, prev_run)
 
     # Iterate for the desired number of steps
-    if sgd.step_i >= mgr.params.max_iterations:
+    if sgd.step_i >= params.max_iterations:
         # TODO Add convergence check (don't compile if converged, even if step_i < max_iterations
         logger.info("Precomputed gradient descent found. Skipping fit.")
         return None, sgd.step_i
 
     # Compile the optimizer
-    logger.info("Compiling {} optimizer...".format(mgr.params.optimizer))
-    sgd.compile( lr = mgr.params.learning_rate )
+    logger.info("Compiling {} optimizer...".format(params.optimizer))
+    sgd.compile( lr = params.learning_rate )
     logger.info("Done.")
 
     # Do the fit
     logger.info("Starting gradient descent fit...")
-    sgd.iterate(Nmax=mgr.params.max_iterations,
-                cost_calc=mgr.params.cost_calc,
-                **mgr.params.cost_calc_params)
+    sgd.iterate(Nmax=params.max_iterations,
+                cost_calc=params.cost_calc,
+                **params.cost_calc_params)
 
     return sgd, sgd.step_i
 
-def load_latest(mgr, pathname):
+def load_latest(pathname):
     # TODO: Move to RunMgr
     # First check if there are any previous runs
     _pathname, ext = os.path.splitext(pathname)
@@ -72,86 +74,85 @@ def load_latest(mgr, pathname):
     else:
         raise core.FileNotFound
 
-    return mgr.load(latest), latest
+    return ml.iotools.load(latest), latest
 
-def get_sgd(mgr, check_previous_runs=True):
-    params = mgr.params.posterior
-    prior_descs = mgr.params.posterior.model.prior
+def get_sgd(mgr):
+    get_sgd_new(mgr.params)
 
-    if 'init_vals' not in mgr.params or mgr.params.init_vals is None:
+def get_sgd_new(params, prev_run=None):
+    global data_dir, label_dir
+
+    post_params = params.posterior
+    prior_descs = params.posterior.model.prior
+
+    if 'init_vals' not in params or params.init_vals is None:
         init_vals = None
     else:
         # TODO: check if init_vals is a list
-        init_vals = mgr.params.init_vals
+        init_vals = params.init_vals
 
     #output_filename = core.get_pathname(core.likelihood_subdir, params)
     #data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
-    sgd_filename = get_sgd_pathname(mgr, label='')
-    data_filename = mgr.get_pathname(params=params.data.params,
-                                     subdir=params.data.dir,
-                                     suffix=params.data.name,
-                                     label='')
-    input_filename = mgr.get_pathname(params=params.input.params,
-                                      subdir=params.input.dir,
-                                      suffix=params.input.name,
-                                      label='')
+    sgd_filename = get_sgd_pathname(params, label='')
+    data_filename = core.get_pathname(data_dir=data_dir,
+                                      params=post_params.data.params,
+                                      subdir=post_params.data.dir,
+                                      suffix=post_params.data.name,
+                                      label_dir=label_dir,
+                                      label=''
+                                      )
+    input_filename = core.get_pathname(data_dir=data_dir,
+                                       params=post_params.input.params,
+                                       subdir=post_params.input.dir,
+                                       suffix=post_params.input.name,
+                                       label_dir=label_dir,
+                                       label=''
+                                       )
     data_filename = core.add_extension(data_filename)
     input_filename = core.add_extension(input_filename)
 
-    if check_previous_runs:
-        # Now load the sgd file
-        try:
-            sgdraw, _ = load_latest(mgr, sgd_filename)
-        except (core.FileNotFound, core.FileRenamed):
-            # There are no previous runs
-            new_run = True
-        else:
-            new_run = False
-            try:
-                if not mgr.args.resume:
-                    # Don't resume: just reload the previous run
-                    new_run = True
-            except AttributeError:
-                # Default is to resume
-                pass
-    else:
-        new_run = True
 
     # Load the data and model to fit. This is required whether or not
     # sgd was loaded from a previous run file
-    data_history = mgr.load(data_filename,
-                    cls=getattr(histories, params.data.type).from_raw,
-                    calc='activity',
-                    recalculate=False)
-    data_history = core.subsample(data_history, params.model.dt)
+    data_history = ml.iotools.load(data_filename)
+                    #cls=getattr(histories, post_params.data.type).from_raw,
+                    #calc='activity',
+                    #recalculate=False)
+    if isinstance(data_history, np.lib.npyio.NpzFile):
+        # Support older data files
+        data_history = Series.from_raw(data_history)
+    data_history = core.subsample(data_history, post_params.model.dt)
     data_history.lock()
 
-    input_history = mgr.load(input_filename,
-                             cls=getattr(histories, params.input.type).from_raw,
-                             calc='input',
-                             recalculate=False)
-    input_history = core.subsample(input_history, params.model.dt)
+    input_history = ml.iotools.load(input_filename)
+                             #cls=getattr(histories, post_params.input.type).from_raw,
+                             #calc='input',
+                             #recalculate=False)
+    if isinstance(input_history, np.lib.npyio.NpzFile):
+        # Support older data files
+        input_history = Series.from_raw(input_history)
+    input_history = core.subsample(input_history, post_params.model.dt)
     input_history.lock()
 
-    prior_sampler = core.get_sampler(params.model.prior)
+    prior_sampler = core.get_sampler(post_params.model.prior)
 
-    model = core.construct_model(gif, params.model, data_history, input_history,
-                                 initializer=params.model.initializer)
+    model = core.construct_model(gif, post_params.model, data_history, input_history,
+                                 initializer=post_params.model.initializer)
 
-    fitmask = get_fitmask(model, params.mask)
+    fitmask = get_fitmask(model, post_params.mask)
 
-    if new_run:
+    if prev_run is None:
         # For a new run, a new sgd instance must be created and initialized
 
         sgd = gd.SGD(
             cost = model.loglikelihood,
             cost_format = 'logL',
-            optimizer = mgr.params.optimizer,
+            optimizer = params.optimizer,
             model = model,
-            start = mgr.params.posterior.burnin,
-            datalen = mgr.params.posterior.datalen,
-            burnin = mgr.params.batch_burnin,
-            mbatch_size = mgr.params.batch_size
+            start = params.posterior.burnin,
+            datalen = params.posterior.datalen,
+            burnin = params.batch_burnin,
+            mbatch_size = params.batch_size
         )
         sgd.set_fitparams(fitmask)
 
@@ -168,7 +169,7 @@ def get_sgd(mgr, check_previous_runs=True):
                 pass
             else:
                 sgd.transform(var, *transform_desc[1:])
-        # for time_cst in [getattr(model.params, tc_name) for tc_name in params.time_constants]:
+        # for time_cst in [getattr(model.params, tc_name) for tc_name in post_params.time_constants]:
         #     if time_cst in fitmask:
         #         sgd.transform( time_cst, 'log' + time_cst.name,
         #                        'τ -> shim.log10(τ)', 'logτ -> 10**logτ' )
@@ -177,15 +178,15 @@ def get_sgd(mgr, check_previous_runs=True):
             # FIXME: Use TransformedVar, and then this whole verification thing won't be needed
 
         # If the parameters which generated the data are known, set them as ground truth
-        if ( 'params' in params.data and isinstance(params.data, ParameterSet)
-             and 'model' in params.data.params
-             and isinstance(params.data.params, ParameterSet) ):
-            #trueparams = core.get_model_params(params.data.params.model,
-            #                                   params.model.type)
+        if ( 'params' in post_params.data and isinstance(post_params.data, ParameterSet)
+             and 'model' in post_params.data.params
+             and isinstance(post_params.data.params, ParameterSet) ):
+            #trueparams = core.get_model_params(post_params.data.params.model,
+            #                                   post_params.model.type)
             # >>>> HACK <<<<<< Above doesn't work e.g. for hetero parameters, which
             #                  aren't compatible with the meso model
-            trueparams = core.get_model_params(params.model.params,
-                                               params.model.type)
+            trueparams = core.get_model_params(post_params.model.params,
+                                               post_params.model.type)
             sgd.set_ground_truth(trueparams)
 
         if init_vals is not None:
@@ -199,7 +200,7 @@ def get_sgd(mgr, check_previous_runs=True):
             if init_vals_format == 'prior':
                 _init_vals_dict = {}
                 # TODO: Checking for substitutions would be cleaner if using TransformedVar
-                for name in params.variables:
+                for name in post_params.variables:
                     var = sgd.get_param(name)
                     if var in sgd.substitutions:
                         _init_var = sgd.substitutions[var][0]
@@ -298,9 +299,9 @@ def get_sgd(mgr, check_previous_runs=True):
         sgd = gd.SGD(
             cost = model.loglikelihood,
             cost_format = 'logL',
-            optimizer = mgr.params.optimizer,
+            optimizer = params.optimizer,
             model = model,
-            sgd_file = sgdraw,
+            sgd_file = prev_run,
             set_params = False  # Have to call verify_transforms first
                 # FIXME: Use default (True) once verify_transforms no longer needed
         )
@@ -334,8 +335,20 @@ def get_param_hierarchy(params):
 
     return [data_params, sgd_params, init_params]
 
+def get_previous_run(params, resume=True):
+    # Now load the sgd file
+    sgd_filename = get_sgd_pathname(params, label='')
+    try:
+        prev_run, _ = load_latest(sgd_filename)
+    except (core.FileNotFound, core.FileRenamed):
+        # There are no previous runs
+        prev_run = None
+    else:
+        if not resume:
+            # Don't resume: just reload the previous run
+            prev_run = None
 
-def get_sgd_pathname(mgr, iterations=None, **kwargs):
+def get_sgd_pathname(params, iterations=None, **kwargs):
     """
     Calculate the filename with a reduced parameter set, where the parameters
     defining the number of iterations are removed.
@@ -344,21 +357,24 @@ def get_sgd_pathname(mgr, iterations=None, **kwargs):
     [init_vals] is the filename. [model], [sgd] and [init_vals] are computed by hashing
     the appropriate parameters.
     """
+    global data_dir, label_dir
 
     suffix = kwargs.pop('suffix', '')
     if iterations is not None:
         assert(isinstance(iterations, int))
         suffix += '_iterations' + str(iterations)
 
-    param_hierarchy = get_param_hierarchy(mgr.params)
-    datahash = mgr.get_filename(param_hierarchy[0])
-    sgdhash = mgr.get_filename(param_hierarchy[1])
+    param_hierarchy = get_param_hierarchy(params)
+    datahash = ml.parameters.get_filename(param_hierarchy[0])
+    sgdhash = ml.parameters.get_filename(param_hierarchy[1])
     init_params = param_hierarchy[2]
 
-    return mgr.get_pathname(init_params,
-                            subdir='+' + datahash + '/' + sgdhash,
-                            suffix=suffix,
-                            **kwargs)
+    return core.get_pathname(data_dir=data_dir,
+                             params=init_params,
+                             subdir='+' + datahash + '/' + sgdhash,
+                             suffix=suffix,
+                             label_dir=label_dir,
+                             **kwargs)
 
 if __name__ == "__main__":
     core.init_logging_handlers()
@@ -371,7 +387,12 @@ if __name__ == "__main__":
 
     shim.load_theano()
 
-    sgd, n_iterations = do_gradient_descent(mgr)
+    # Check if we can continue a previous run
+    resume = getattr(mgr.args, 'resume', True)
+    prev_run = get_previous_run(mgr.params, resume)
+
+    # Do the fit
+    sgd, n_iterations = do_gradient_descent(mgr.params, prev_run)
 
     if sgd is not None:
         if mgr.args.debug:
