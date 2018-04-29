@@ -12,8 +12,10 @@ import sinn.optimize.gradient_descent as gd
 from sinn.histories import Series, Spiketrain
 import mackelab as ml
 import mackelab.iotools
+import mackelab.parameters
 
 from fsGIF import core
+from fsGIF.mcmc import get_pymc_model_new as get_pymc_model  # FIXME: Move function to avoid sibling import
 logger = core.logger
 ############################
 # Model import
@@ -22,13 +24,17 @@ data_dir = "data"
 label_dir = "run_dump"
 ############################
 
+# >>>FIXME<<<<<
+# Current implementation constructs the computational graph for the cost at least 4 times.
+
+
 def do_gradient_descent(params, prev_run=None):
 
     # Create the sgd object
     sgd = get_sgd_new(params, prev_run)
 
     # Iterate for the desired number of steps
-    if sgd.step_i >= params.max_iterations:
+    if sgd.step_i >= params.sgd.max_iterations:
         # TODO Add convergence check (don't compile if converged, even if step_i < max_iterations
         logger.info("Precomputed gradient descent found. Skipping fit.")
         return None, sgd.step_i
@@ -40,7 +46,7 @@ def do_gradient_descent(params, prev_run=None):
 
     # Do the fit
     logger.info("Starting gradient descent fit...")
-    sgd.iterate(Nmax=params.max_iterations,
+    sgd.iterate(Nmax=params.sgd.max_iterations,
                 cost_calc=params.cost_calc,
                 **params.cost_calc_params)
 
@@ -76,14 +82,12 @@ def load_latest(pathname):
 
     return ml.iotools.load(latest), latest
 
-def get_sgd(mgr):
-    get_sgd_new(mgr.params)
-
-def get_sgd_new(params, prev_run=None):
+def get_model(params):
     global data_dir, label_dir
 
+    params = ml.parameters.params_to_arrays(params)
+
     post_params = params.posterior
-    prior_descs = params.posterior.model.prior
 
     if 'init_vals' not in params or params.init_vals is None:
         init_vals = None
@@ -139,12 +143,84 @@ def get_sgd_new(params, prev_run=None):
     model = core.construct_model(gif, post_params.model, data_history, input_history,
                                  initializer=post_params.model.initializer)
 
+    return model, prior_sampler
+
+def get_sgd_new(params, prev_run=None):
+    model, prior_sampler = get_model(params)
+    pymc_model, pymc_priors = get_pymc_model(params.posterior, model)
+        # TODO: Put into get_model() when legacy is dropped
+
+    if prev_run is None:
+        def cost(tidx, batch_size):
+            logL = model.loglikelihood(tidx, batch_size)[0]
+            prior_logp = shim.sum([shim.cast_floatX(v.logpt) for v in pymc_model.vars])
+                # FIXME: prior logp's still have dtype='float64',
+                # no matter the value of floatX.
+                # This is probably due to some internal constants
+                # which are double precision.
+            return logL + prior_logp
+        # Get the variables to track
+        # We track the non-transformed variables of the prior. For each variable,
+        # we extract the corresponding PyMC3 symbolic quantity, which we transform
+        # back.
+        track_vars = OrderedDict(
+            (name, prior.transform.back(pymc_model.named_vars[prior.transform.names.new]))
+            for name, prior in pymc_priors.items() )
+        start = model.t0idx + model.index_interval(params.posterior.burnin)
+        datalen = model.index_interval(params.posterior.datalen)
+        burnin = model.index_interval(params.sgd.batch_burnin)
+        batch_size = model.index_interval(params.sgd.batch_size)
+
+        if getattr(params.sgd, 'mode', None) == 'sequential':
+            def model_initialize(t):
+                model.initialize(t=0.)
+                    # NOTE: <int> 0 is first time bin, no matter padding
+                    #       <float> 0. is time bin of t0
+                model.advance(t)
+        else:
+            def model_initialize(t):
+                model.initialize(t=t)
+
+        model.theano_reset() # TODO: deprecated ?
+        model.clear_unlocked_histories()
+        sgd = gd.SeriesSGD(
+            cost = cost,
+            cost_format = 'logL',
+            optimize_vars = pymc_model.vars,
+            track_vars = track_vars,
+            advance = model.advance_updates,
+            initialize = model_initialize,
+            start = start,
+            datalen = datalen,
+            burnin = burnin,
+            batch_size = batch_size,
+            optimizer = params.sgd.optimizer,
+            lr = params.sgd.learning_rate,
+            mode = params.sgd.mode,
+            cost_track_freq = params.sgd.cost_track_freq,
+            var_track_freq = params.sgd.var_track_freq
+        )
+        model.clear_unlocked_histories()
+        model.theano_reset() # TODO: deprecated ?
+
+    return sgd
+
+def get_sgd(mgr):
+    get_sgd_legacy(mgr.params)
+
+def get_sgd_legacy(params, prev_run=None):
+
+    model, prior_sampler = get_model(params)
+
+    post_params = params.posterior
+    prior_descs = params.posterior.model.prior
+
     fitmask = get_fitmask(model, post_params.mask)
 
     if prev_run is None:
         # For a new run, a new sgd instance must be created and initialized
 
-        sgd = gd.SGD(
+        sgd = gd.SGD_old(
             cost = model.loglikelihood,
             cost_format = 'logL',
             optimizer = params.optimizer,
@@ -296,7 +372,7 @@ def get_sgd_new(params, prev_run=None):
 
     else:
         # Create the SGD from the loaded raw data
-        sgd = gd.SGD(
+        sgd = gd.SGD_old(
             cost = model.loglikelihood,
             cost_format = 'logL',
             optimizer = params.optimizer,
@@ -321,17 +397,15 @@ def get_param_hierarchy(params):
     Return a list of mutually exclusive ParameterSets, each subsequent set corresponding to
     a nested directory.
     """
-    sgd_params = copy.deepcopy(params)
-    # Parameters we never care about saving
-    del sgd_params['max_iterations']
-    # Initial value parameters - deepest level
-    init_params = sgd_params.init_vals
-    del sgd_params['init_vals']
+    # SGD parameters
+    sgd_params = copy.deepcopy(params.sgd)
+    sgd_params.pop('max_iterations', None)  # Don't use max_iterations for filename
+    # Initial parameter values
+    init_params = copy.deepcopy(params.init_vals)
     # Dataset parameters
     data_keys = ['data', 'input', 'model']
-    data_params = ParameterSet({key: sgd_params.posterior[key] for key in data_keys})
-    for key in data_keys:
-        del sgd_params.posterior[key]
+    data_params = copy.deepcopy(
+        ParameterSet({key: params.posterior[key] for key in data_keys}))
 
     return [data_params, sgd_params, init_params]
 
@@ -391,12 +465,26 @@ if __name__ == "__main__":
     resume = getattr(mgr.args, 'resume', True)
     prev_run = get_previous_run(mgr.params, resume)
 
-    # Do the fit
-    sgd, n_iterations = do_gradient_descent(mgr.params, prev_run)
+    #sgd, n_iterations = do_gradient_descent(mgr.params, prev_run)
 
-    if sgd is not None:
+    # Load the gradient descent class
+    sgd = get_sgd_new(mgr.params, prev_run)
+
+    # Check if the fit has already been done
+    if sgd.step_i >= mgr.params.sgd.max_iterations:
+        # TODO Add convergence check (don't compile if converged, even if step_i < max_iterations
+        skipped = True
+        logger.info("Precomputed gradient descent found. Skipping fit.")
+        #return None, sgd.step_i
+    else:
+        # Do the fit
+        skipped = False
+        logger.info("Starting gradient descent fit...")
+        sgd.fit(Nmax=mgr.params.sgd.max_iterations)
+
+    if not skipped:
         if mgr.args.debug:
             output_filename = 'gd_debug.npr'
         else:
-            output_filename = get_sgd_pathname(mgr, n_iterations, label=None)
+            output_filename = get_sgd_pathname(mgr.params, sgd.step_i, label=None)
         ml.iotools.save(output_filename, sgd)
