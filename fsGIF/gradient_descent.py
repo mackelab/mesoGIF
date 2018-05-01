@@ -673,7 +673,7 @@ def get_sgd_pathname(params, iterations=None, **kwargs):
 
     return core.get_pathname(data_dir=data_dir,
                              params=init_params,
-                             subdir='+' + datahash + '/' + sgdhash,
+                             subdir='fits/' + datahash + '/' + sgdhash,
                              suffix=suffix,
                              label_dir=label_dir,
                              **kwargs)
@@ -724,6 +724,7 @@ if __name__ == "__main__":
         if mgr.args.debug:
             output_filename = 'gd_debug.npr'
         else:
-            output_filename = get_sgd_pathname(mgr.params, sgd.step_i, label=None)
+            output_filename = get_sgd_pathname(mgr.params, sgd.step_i,
+                                               label=mgr.label)
 
         ml.iotools.save(output_filename, sgd)

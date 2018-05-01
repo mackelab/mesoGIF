@@ -668,6 +668,7 @@ def add_extension(filename):
 def get_pathname(data_dir, params, suffix, subdir, label_dir=None, label=""):
     label_dir = "" if label == "" else label_dir
         # Only add the label directory when there's a label
+    assert(label is not None)
     assert(label_dir is not None)  # label_dir only optional if label==""
     return os.path.join(data_dir, label_dir, label, subdir,
                         ml.parameters.get_filename(params, suffix))
