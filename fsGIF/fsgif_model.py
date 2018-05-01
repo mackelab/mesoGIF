@@ -693,6 +693,9 @@ class GIF_mean_field(models.Model):
         self.set_refractory_mask()
             # FIXME: Make dependence on t_ref symbolic - at present can't update t_ref
 
+        # Set to which history the logL corresponds to
+        self.observed_var = self.n._data
+
         #####################################################
         # Create the loglikelihood function
         # FIXME: Doesn't work with Theano histories because they only support updating tidx+1
