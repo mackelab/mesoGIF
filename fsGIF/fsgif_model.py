@@ -80,7 +80,7 @@ class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
             return self.params.height
         else:
             # t has already been shaped to align with the function output in Kernel.eval
-            return shim.ones(t.shape, dtype=sinn.config.floatX) * self.params.height
+            return shim.ones(t.shape, dtype=shim.config.floatX) * self.params.height
 
 class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
     @staticmethod
@@ -240,7 +240,7 @@ class GIF_spiking(models.Model):
         self.memory_time = shim.cast(max(memory_time,
                                          max( kernel.memory_time
                                               for kernel in [self.ε, self.θ1, self.θ2] ) ),
-                                     dtype=config.floatX)
+                                     dtype=shim.config.floatX)
         self.K = np.rint( self.memory_time / self.dt ).astype(int)
         self.s.pad(self.memory_time)
         # Pad because these are ODEs (need initial condition)
@@ -463,7 +463,7 @@ class GIF_spiking(models.Model):
                 # FIXME np.float64 -> shim.floatX or sinn.floatX
                 logL, upds = shim.gettheano().scan(logLstep,
                                                 sequences = shim.getT().arange(startidx, stopidx),
-                                                outputs_info = np.float64(0))
+                                                outputs_info = np.asarray(0, dtype=shim.config.floatX))
                 self.apply_updates(upds)
                     # Applying updates is essential to remove the temporary iteration variable
                     # scan introduces from the shim updates dictionary
@@ -882,7 +882,7 @@ class GIF_mean_field(models.Model):
 
         T = max(T, 5*self.params.τ_m.get_value().max(), self.A.dt)
         K = self.index_interval(T, allow_rounding=True)
-        return shim.cast(T,config.floatX), K
+        return shim.cast(T,shim.config.floatX), K
 
     def init_kernels(self):
         if not hasattr(self, 'θ_dis'):
@@ -1104,7 +1104,7 @@ class GIF_mean_field(models.Model):
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(
             lambda t: np.sum( (kernel.eval(t) for kernel in θ),
-                              dtype=config.floatX ).astype(config.floatX) )
+                              dtype=shim.config.floatX ).astype(shim.config.floatX) )
             # If t is float64, specifying dtype inside sum() isn't always enough, so we astype as well
         # HACK Currently we only support updating by one history timestep
         #      at a time (Theano), so for kernels (which are fully computed
@@ -1583,11 +1583,11 @@ class GIF_mean_field(models.Model):
             p = sinn.clip_probabilities(nbar / self.params.N)
             n = n_full[tidx-self.t0idx+t0idx]
 
-            assert(args[0].dtype == config.floatX)
+            assert(args[0].dtype == shim.config.floatX)
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
                                    + n*shim.log(p)
                                    + (N-n)*shim.log(1-p)
-                                  ).sum(dtype=config.floatX)
+                                  ).sum(dtype=shim.config.floatX)
 
             return [cum_logL] + [n] + list(statevar_updates.values()), {}
             # FIXME: Remove [n] once it is included in state vars
@@ -1598,7 +1598,7 @@ class GIF_mean_field(models.Model):
 
             # Create the outputs_info list
             # First element is the loglikelihood, subsequent are aligned with input_vars
-            outputs_info = [shim.cast(0, sinn.config.floatX)]
+            outputs_info = [shim.cast(0, shim.config.floatX)]
 
             # FIXME: Remove once 'n' is in state variables
             outputs_info.append( self.n._data[startidx - self.t0idx + self.n.t0idx - 1] )
@@ -1835,7 +1835,7 @@ class GIF_mean_field(models.Model):
         if shim.isscalar(t):
             slice_shape = (1,) + self.v.shape[1:]
             return shim.concatenate(
-                ( shim.zeros(slice_shape, dtype=sinn.config.floatX),
+                ( shim.zeros(slice_shape, dtype=shim.config.floatX),
                   (1 - self.P_λ[t][1:])**2 * self.v[tidx_v-1][:-1] + self.P_λ[t][1:] * self.m[tidx_m-1][:-1]
                 ),
                 axis=0)
@@ -1843,7 +1843,7 @@ class GIF_mean_field(models.Model):
             assert(t.ndim == 1)
             slice_shape = t.shape + (1,) + self.v.shape[1:]
             return shim.concatenate(
-                ( shim.zeros(slice_shape, dtype=sinn.config.floatX),
+                ( shim.zeros(slice_shape, dtype=shim.config.floatX),
                   (1 - self.P_λ[t][:,1:])**2 * self.v[tidx_v-1][:,:-1] + self.P_λ[t][:,1:] * self.m[tidx_m-1][:,:-1]
                 ),
                 axis=1)
@@ -1979,7 +1979,7 @@ class GIF_mean_field(models.Model):
                           + ( ( self.params.τ_s * red_factor_τs * ( yt - self.A_Δ[tidx+self.A_Δ.t0idx] )
                                 - red_factor_τmT * (self.params.τ_s * yt - τ_mα * self.A_Δ[tidx+self.A_Δ.t0idx]) )
                               / (self.params.τ_s - τ_mα) ) )
-                   ).sum(axis=-1, dtype=config.floatX) )
+                   ).sum(axis=-1, dtype=shim.config.floatX) )
 
         # ht
         red_factor = shim.exp(-self.h.dt/self.params.τ_m.flatten() )
@@ -2021,7 +2021,7 @@ class GIF_mean_field(models.Model):
 
         # P_λt
         λprev = shim.concatenate(
-            ( shim.zeros((1,) + self.λ.shape[1:], dtype=config.floatX),
+            ( shim.zeros((1,) + self.λ.shape[1:], dtype=shim.config.floatX),
               λ0[:-1] ) )
         P_λ_tmp = 0.5 * (λt + λprev) * self.P_λ.dt
         P_λt = shim.switch(P_λ_tmp <= 0.01,
@@ -2040,7 +2040,7 @@ class GIF_mean_field(models.Model):
 
         # vt
         vt = shim.concatenate(
-            ( shim.zeros( (1,) + self.v.shape[1:] , dtype=sinn.config.floatX),
+            ( shim.zeros( (1,) + self.v.shape[1:] , dtype=shim.config.floatX),
               (1 - P_λt[1:])**2 * v0[:-1] + P_λt[1:] * m0[:-1] ),
             axis=-2)
 
