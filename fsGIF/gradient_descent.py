@@ -278,6 +278,14 @@ def get_sgd_new(params, model, pymc_model, start_var, batch_size_var):
         def model_initialize(t):
             model.initialize(t=t)
 
+    if params.sgd.cost == 'loglikelihood':
+        cost = shim.cast_floatX(pymc_model.n.logpt)
+    elif params.sgd.cost == 'posterior':
+        cost = shim.cast_floatX(pymc_model.logpt)
+    else:
+        raise ValueError("Unrecognized cost descriptor '{}'"
+                         .format(params.sgd.cost))
+
     model.theano_reset() # TODO: deprecated ?
     model.clear_unlocked_histories()
     sgd = gd.SeriesSGD(
