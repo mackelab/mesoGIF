@@ -930,9 +930,9 @@ class GIF_mean_field(models.Model):
         """
         self.clear_unlocked_histories()
 
-        # If t is not None, convert to float so that it's consistent across histories
-        if t is not None:
-            t = self.get_time(t)
+        # # If t is not None, convert to float so that it's consistent across histories
+        # if t is not None:
+        #     t = self.get_time(t)
 
         if initializer is None:
             initializer = self.default_initializer
@@ -978,15 +978,16 @@ class GIF_mean_field(models.Model):
 
         # Note that A is initialized w/ :tidx, so up to tidx-1
         if t is None:
-            tidx = self.A.t0idx
+            Atidx = self.A.t0idx
         else:
-            tidx = self.A.get_t_idx(t)
-        assert(tidx >= 1)
+            tidx = self.get_t_idx(t)
+            Atidx = tidx - self.t0idx + self.A.t0idx
+        assert(Atidx >= 1)
 
         data = self.A._data.get_value(borrow=True)
-        data[:tidx,:] = init_A
+        data[:Atidx,:] = init_A
         self.A._data.set_value(data, borrow=True)
-        self.A._cur_tidx.set_value(tidx - 1)
+        self.A._cur_tidx.set_value(Atidx - 1)
         self.A._original_tidx = self.A._cur_tidx
 
     def init_latent_vars(self, init_state, t=None):
@@ -1008,6 +1009,11 @@ class GIF_mean_field(models.Model):
 
         # FIXME: Initialize series' to 0
 
+        if t is None:
+            tidx = self.t0idx; assert(tidx >= 0)
+        else:
+            tidx = self.get_t_idx(t)
+
         for varname in self.ObservedState._fields:
             hist = getattr(self, varname)
             if hist._original_tidx.get_value() < hist.t0idx - 1:
@@ -1028,14 +1034,11 @@ class GIF_mean_field(models.Model):
             initval = getattr(init_state, varname)
             hist.pad(1)  # Ensure we have at least one bin for the initial value
                 # TODO: Allow longer padding
-            if t is None:
-                tidx = hist.t0idx - 1; assert(tidx >= 0)
-            else:
-                tidx = hist.get_t_idx(t) - 1; assert(tidx >= 0)
+            histtidx = tidx - self.t0idx + hist.t0idx - 1; assert(histtidx >= 0)
             data = hist._data.get_value(borrow=True)
-            data[tidx,:] = initval
+            data[histtidx,:] = initval
             hist._data.set_value(data, borrow=True)
-            hist._cur_tidx.set_value(tidx)
+            hist._cur_tidx.set_value(histtidx)
             hist._original_tidx = hist._cur_tidx
 
         # # Make all neurons free neurons
