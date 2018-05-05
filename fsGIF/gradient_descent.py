@@ -244,7 +244,7 @@ def get_pymc_model(params, model, batch_size):
 
     return pymc_model, priors, start, batch_size_var
 
-def get_sgd_new(params, model, pymc_model, start_var, batch_size_var):
+def get_sgd(params, model, pymc_model, start_var, batch_size_var):
 
     # def cost(tidx, batch_size):
     #     logL = model.loglikelihood(tidx, batch_size)[0]
@@ -307,6 +307,7 @@ def get_sgd_new(params, model, pymc_model, start_var, batch_size_var):
         optimizer = params.sgd.optimizer,
         lr = params.sgd.learning_rate,
         mode = params.sgd.mode,
+        mode_params = params.sgd.get('mode_params', None),
         cost_track_freq = params.sgd.cost_track_freq,
         var_track_freq = params.sgd.var_track_freq
     )
@@ -709,7 +710,7 @@ if __name__ == "__main__":
     pymc_model, pymc_priors, start_var, batch_size_var = \
         get_pymc_model(mgr.params.posterior, model, mgr.params.sgd.batch_size)
     if prev_run is None:
-        sgd = get_sgd_new(mgr.params, model, pymc_model, start_var, batch_size_var)
+        sgd = get_sgd(mgr.params, model, pymc_model, start_var, batch_size_var)
 
     # Check if the fit has already been done
     if sgd.step_i >= mgr.params.sgd.max_iterations:
