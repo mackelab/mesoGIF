@@ -1397,6 +1397,7 @@ class GIF_mean_field(models.Model):
 
         return state
 
+    # FIXME: Before replacing with Model's `advance`, need to remove HACKs
     def advance(self, stop):
 
         if stop == 'end':
@@ -1411,7 +1412,7 @@ class GIF_mean_field(models.Model):
                 continue
             if h.locked:
                 tn = h.get_time(h._original_tidx.get_value())
-                if tn < self.nbar.get_time(stopidx):
+                if tn < self._refhist.get_time(stopidx):
                     logger.warning("Locked history '{}' is only provided "
                                    "up to t={}. Output will be truncated."
                                    .format(h.name, tn))
@@ -1419,7 +1420,7 @@ class GIF_mean_field(models.Model):
 
 
         if not shim.config.use_theano:
-            self.nbar[stopidx - self.t0idx + self.nbar.t0idx]
+            self._refhist[stopidx - self.t0idx + self._refhist.t0idx]
             for hist in self.statehists:
                 hist[stopidx - self.t0idx + hist.t0idx]
 
@@ -1430,6 +1431,8 @@ class GIF_mean_field(models.Model):
 
             if curtidx+1 < stopidx:
                 self._advance(stopidx)
+                for hist in self.statehists:
+                    hist.theano_reset()
                 # newvals = self._advance_fn(curtidx, stopidx)
                 # # HACK: We change the history directly to avoid dealing with updates
                 # for hist, newval in zip(self.statehists, newvals):
@@ -1489,6 +1492,7 @@ class GIF_mean_field(models.Model):
         if len(self.statehists) == 0:
             raise NotImplementedError
         elif len(self.statehists) == 1:
+            hist = self.statehists[0]
             startidx = hist._original_tidx - hist.t0idx + self.t0idx
         else:
             startidx = shim.smallest( *( hist._original_tidx - hist.t0idx + self.t0idx
