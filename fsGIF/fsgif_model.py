@@ -601,7 +601,7 @@ class GIF_mean_field(models.Model):
         # TODO: Will this still work when `nbar` is made a temporary ?
         # We use nbar because it is either the latest in the dependency cycle (if A is given)
         # or second latest (if A is not given)
-        self.nbar = Series(self.A, 'nbar', use_theano=False)
+        self.nbar = Series(self.A, 'nbar', symbolic=False)
 
         # Run the base class initialization
         super().__init__(params, reference_history=self.nbar)
@@ -640,45 +640,45 @@ class GIF_mean_field(models.Model):
                             memory_time=self.memory_time)
 
         # Histories
-        self.n = Series(self.A, 'n', dtype=self.params.N.dtype, use_theano=shim.config.use_theano)
-        self.h = Series(self.A, 'h', use_theano=shim.config.use_theano)
-        self.h_tot = Series(self.A, 'h_tot', use_theano=False)
-        self.u = Series(self.A, 'u', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)
+        self.n = Series(self.A, 'n', dtype=self.params.N.dtype)
+        self.h = Series(self.A, 'h')
+        self.h_tot = Series(self.A, 'h_tot', symbolic=False)
+        self.u = Series(self.A, 'u', shape=(self.K, self.Npops))
             # self.u[t][0] is the array of membrane potentials at time t, at lag Δt, of each population
             # TODO: Remove +1: P_λ_fn doesn't need it anymore
-        self.varθ = Series(self.u, 'varθ', use_theano=shim.config.use_theano)
-        self.λ = Series(self.u, 'λ', use_theano=shim.config.use_theano)
+        self.varθ = Series(self.u, 'varθ')
+        self.λ = Series(self.u, 'λ')
 
         # Temporary variables
         #self.nbar = Series(self.n, 'nbar', use_theano=False)
-        self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), use_theano=False)
+        self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), symbolic=False)
         #self.g = Series(self.A, 'g', shape=(self.Npops, self.Nθ,))
-        self.g = Series(self.A, 'g', shape=(self.Npops,), use_theano=shim.config.use_theano)  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
+        self.g = Series(self.A, 'g', shape=(self.Npops,))  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
 
         # Free neurons
-        self.x = Series(self.A, 'x', use_theano=shim.config.use_theano)                        # number of free neurons
-        self.y = Series(self.A, 'y', shape=(self.Npops, self.Npops),
-                        use_theano=shim.config.use_theano)  # auxiliary variable for the membrane potential of free neurons (avoids convolution)
-        self.z = Series(self.x, 'z', use_theano=shim.config.use_theano)                                         # variance function integrated over free neurons
-        self.varθfree = Series(self.A, 'varθfree', shape=(self.Npops,),
-                               use_theano=shim.config.use_theano)  # HACK: Nθ = 1
+        self.x = Series(self.A, 'x')                        # number of free neurons
+        self.y = Series(self.A, 'y', shape=(self.Npops, self.Npops))
+            # auxiliary variable for the membrane potential of free neurons (avoids convolution)
+        self.z = Series(self.x, 'z')
+            # variance function integrated over free neurons
+        self.varθfree = Series(self.A, 'varθfree', shape=(self.Npops,))  # HACK: Nθ = 1
         #self.λtilde = Series(self.u, 'λtilde')
             # In pseudocode, same symbol as λtildefree
         #self.λtildefree = Series(self.A, 'λtildefree')
-        self.λfree = Series(self.A, 'λfree', use_theano=shim.config.use_theano)
+        self.λfree = Series(self.A, 'λfree')
             #TODO: Either just take λtilde in the past, or make λtilde & λfree variables
-        self.Pfree = Series(self.λfree, 'Pfree', use_theano=False)
+        self.Pfree = Series(self.λfree, 'Pfree', symbolic=False)
 
         # Refractory neurons
-        self.m = Series(self.u, 'm', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)          # Expected no. neurons for each last-spike bin
+        self.m = Series(self.u, 'm', shape=(self.K, self.Npops))           # Expected no. neurons for each last-spike bin
             # One more than v, because we need the extra spill-over bin to compute how many neurons become 'free' (Actually, same as v)
-        self.P_λ = Series(self.m, 'P_λ', use_theano=False)
-        self.v = Series(self.m, 'v', shape=(self.K, self.Npops), use_theano=shim.config.use_theano)
-        self.P_Λ = Series(self.Pfree, 'P_Λ', use_theano=False)
-        self.X = Series(self.A, 'X', use_theano=False)
-        self.Y = Series(self.X, 'Y', use_theano=False)
-        self.Z = Series(self.X, 'Z', use_theano=False)
-        self.W = Series(self.X, 'W', use_theano=False)
+        self.P_λ = Series(self.m, 'P_λ', symbolic=False)
+        self.v = Series(self.m, 'v', shape=(self.K, self.Npops))
+        self.P_Λ = Series(self.Pfree, 'P_Λ', symbolic=False)
+        self.X = Series(self.A, 'X', symbolic=False)
+        self.Y = Series(self.X, 'Y', symbolic=False)
+        self.Z = Series(self.X, 'Z', symbolic=False)
+        self.W = Series(self.X, 'W', symbolic=False)
 
         # HACK For propagating gradients without scan
         #      Order must be consistent with return value of symbolic_update
