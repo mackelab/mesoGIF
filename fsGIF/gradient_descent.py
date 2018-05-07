@@ -698,6 +698,7 @@ if __name__ == "__main__":
 
     shim.load_theano()
     sinn.config.set_floatX()  # FIXME: Workaround because it sets sinn.config.rel_tolerance
+    shim.gettheano().config.compute_test_value = 'raise'
 
     # Check if we can continue a previous run
     resume = getattr(mgr.args, 'resume', True)
