@@ -407,6 +407,8 @@ class RunMgr:
         self.params = self._params_to_arrays(ParameterSet(args.parameters))
         if 'theano' in self.params and self.params.theano:
             shim.load_theano()
+        if 'sinn_compat_version' in self.params:
+            sinn.config.compat_version.set(self.params.sinn_compat_version)
 
         self.args = ParameterSet( {name: val
                                    for name, val in vars(args).items()
