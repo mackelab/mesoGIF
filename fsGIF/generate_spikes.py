@@ -1,10 +1,12 @@
 import os.path
 import numpy as np
+from tqdm import tqdm
 
 import theano_shim as shim
 import mackelab as ml
 import mackelab.parameters
 import mackelab.iotools as iotools
+import sinn
 from sinn.histories import Series, Spiketrain
 
 from fsGIF import core
@@ -14,6 +16,8 @@ logger = core.logger
 from fsGIF import fsgif_model as gif
 gif.homo = False  # HACK
 ############################
+
+sinn.config.set_floatX()
 
 """
 Expected parameters format:
@@ -72,8 +76,14 @@ def generate_spikes(mgr):
     #shist.set_connectivity(w)
 
     # Generate the spikes
+    # We could just call mfmodel.advance('end'), but doing it sequentially allows the progress bar
+    # And since we know that variables have to be computed iteratively anyway, there's not much
+    # cost to doing this.
     logger.info("Generating new spike data...")
-    shist.set()
+    #shist.set()
+    for i in tqdm(range(spiking_model.t0idx, spiking_model.tnidx),
+                  position=mgr.args.threadidx):
+        spiking_model.advance(i)
     logger.info("Done.")
 
     # Reload Theano if it was loaded when we entered the function
@@ -143,4 +153,3 @@ if __name__ == "__main__":
         ahist.set_update_function(afunc)
         ahist.set()
         iotools.save(spike_a_filename, ahist, format='npr')
-

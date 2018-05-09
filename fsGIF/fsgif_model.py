@@ -193,14 +193,16 @@ class GIF_spiking(models.Model):
 
         # Model variables
         self.RI_syn = Series(self.s, 'RI_syn',
-                             shape = (N.sum(), ))
-        self.λ = Series(self.RI_syn, 'λ')
+                             shape = (N.sum(), ),
+                             dtype = shim.config.floatX)
+        self.λ = Series(self.RI_syn, 'λ', dtype=shim.config.floatX)
         self.varθ = Series(self.RI_syn, 'ϑ')
         self.u = Series(self.RI_syn, 'u')
         # Surrogate variables
         self.t_hat = Series(self.RI_syn, 't_hat')
             # time since last spike
 
+        self.statehists = [ getattr(self, varname) for varname in self.State._fields ]
         # Kernels
         shape2d = (self.Npops, self.Npops)
         self.ε = Kernel_ε('ε', self.params, shape=shape2d)
@@ -258,7 +260,9 @@ class GIF_spiking(models.Model):
         # )
 
         #if self.s._original_tidx.get_value() < self.s.t0idx:
+        logger.info("Initializing model state variables...")
         self.init_state_vars(initializer)
+        logger.info("Done.")
 
         # TODO: Do something with the state variables if we don't initialize them
         #       (e.g. if we try to calculate t_hat, we will try to get t_hat[t-1],
@@ -480,6 +484,45 @@ class GIF_spiking(models.Model):
 
             return logL, upd
 
+    # FIXME: Before replacing with Model's `advance`, need to remove HACKs
+    def advance(self, stop):
+
+        if stop == 'end':
+            stopidx = self.tnidx
+        else:
+            stopidx = self.get_t_idx(stop)
+
+        # Make sure we don't go beyond given data
+        for h in self.history_set:
+            # HACK: Should exclude kernels
+            if h.name in ['θ_dis', 'θtilde_dis']:
+                continue
+            if h.locked:
+                tn = h.get_time(h._original_tidx.get_value())
+                if tn < self._refhist.get_time(stopidx):
+                    logger.warning("Locked history '{}' is only provided "
+                                   "up to t={}. Output will be truncated."
+                                   .format(h.name, tn))
+                    stopidx = self.nbar.get_t_idx(tn)
+
+        if not shim.config.use_theano:
+            self._refhist.compute_up_to(stopidx - self.t0idx + self._refhist.t0idx)
+            for hist in self.statehists:
+                hist.compute_up_to(stopidx - self.t0idx + hist.t0idx)
+
+        else:
+            curtidx = min( hist._original_tidx.get_value() - hist.t0idx + self.t0idx
+                           for hist in self.statehists )
+            assert(curtidx >= -1)
+
+            if curtidx+1 < stopidx:
+                self._advance(stopidx)
+                for hist in self.statehists:
+                    hist.theano_reset()
+
+    def _advance(stopidx):
+        raise NotImplementedError
+
     def f(self, u):
         """Link function. Maps difference between membrane potential & threshold
         to firing rate."""
@@ -540,8 +583,8 @@ class GIF_spiking(models.Model):
         return ( self.rndstream.binomial( size = self.s.shape,
                                           n = 1,
                                           p = sinn.clip_probabilities(self.λ[t]*self.s.dt) )
-                 .nonzero()[0] )
-            # nonzero returns a tuple, with one element per axis
+                 .nonzero()[0].astype(self.s.idx_dtype) )
+            # nonzero returns a tuple, with oner element per axis
 
     def t_hat_fn(self, t):
         """Update time since last spike"""
@@ -1106,7 +1149,8 @@ class GIF_mean_field(models.Model):
                        time_array = np.arange(dt, memory_time+dt, dt),
                        #t0 = dt,
                        #tn = memory_time+reference_hist.dt,
-                       iterative = False)
+                       iterative = False,
+                       dtype=shim.config.floatX)
             # Starts at dt because memory buffer does not include current time
         θ_dis.set_update_function(
             lambda t: np.sum( (kernel.eval(t) for kernel in θ),
@@ -1420,9 +1464,9 @@ class GIF_mean_field(models.Model):
 
 
         if not shim.config.use_theano:
-            self._refhist[stopidx - self.t0idx + self._refhist.t0idx]
+            self._refhist.compute_up_to(stopidx - self.t0idx + self._refhist.t0idx)
             for hist in self.statehists:
-                hist[stopidx - self.t0idx + hist.t0idx]
+                hist.compute_up_to(stopidx - self.t0idx + hist.t0idx)
 
         else:
             curtidx = min( hist._original_tidx.get_value() - hist.t0idx + self.t0idx
