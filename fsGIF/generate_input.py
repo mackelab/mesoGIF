@@ -50,6 +50,7 @@ def generate_input(mgr):
             hist_params['random_stream'] = rndstream
         hists[histname] = HistType(name=histname,
                                    t0=params.t0, tn=params.tn, dt=params.dt,
+                                   dtype=shim.config.floatX,
                                    **hist_params)
 
     # Replace the "safe" operators with their standard forms
