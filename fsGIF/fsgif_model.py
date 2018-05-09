@@ -532,7 +532,8 @@ class GIF_spiking(models.Model):
     # CHECK
     def RI_syn_fn(self, t):
         """Incoming synaptic current times membrane resistance. Eq. (20)."""
-        return ( self.params.τ_m * self.s.convolve(self.ε, t) )
+        t_s = self.RI_syn.get_t_for(t, self.s)
+        return ( self.params.τ_m * self.s.convolve(self.ε, t_s) )
             # s includes the connection weights w, and convolution also includes
             # the sums over j and β in Eq. 20.
             # Need to fix spiketrain convolution before we can use the exponential
@@ -544,15 +545,15 @@ class GIF_spiking(models.Model):
     def u_fn(self, t):
         """Membrane potential. Eq. (21)."""
         if not shim.isscalar(t):
-            tidx_u_m1 = self.u.time_array_to_slice(t - self.u.dt)
-            t_that = self.t_hat.time_array_to_slice(t)
-            t_Iext = self.I_ext.time_array_to_slice(t)
-            t_RIsyn = self.RI_syn.time_array_to_slice(t)
+            tidx_u_m1 = self.u.array_to_slice(t - self.u.dt)
+            t_that = self.t_hat.array_to_slice(self.u.get_t_for(t, self.t_hat))
+            t_Iext = self.I_ext.array_to_slice(self.u.get_t_for(t, self.I_ext))
+            t_RIsyn = self.RI_syn.array_to_slice(self.u.get_t_for(t, self.RI_syn))
         else:
             tidx_u_m1 = self.u.get_t_idx(t) - 1
-            t_that = t
-            t_Iext = t
-            t_RIsyn = t
+            t_that = self.u.get_t_for(t, self.t_hat)
+            t_Iext = self.u.get_t_for(t, self.I_ext)
+            t_RIsyn = self.u.get_t_for(t, self.RI_syn)
             # Take care using this on another history than u – it may be padded
         # Euler approximation for the integral of the differential equation
         # 'm1' stands for 'minus 1', so it's the previous time bin
@@ -567,7 +568,9 @@ class GIF_spiking(models.Model):
     # CHECK
     def varθ_fn(self, t):
         """Dynamic threshold. Eq. (22)."""
-        return (self.params.u_th + self.s.convolve(self.θ1, t) + self.s.convolve(self.θ2, t)).expand_axis(-1, 'Micro').values
+        t_s = self.RI_syn.get_t_for(t, self.s)
+        return (self.params.u_th + self.s.convolve(self.θ1, t_s)
+                + self.s.convolve(self.θ2, t_s)).expand_axis(-1, 'Micro').values
             # Need to fix spiketrain convolution before we can use the exponential
             # optimization. (see fixme comments in histories.spiketrain._convolve_single_t
             # and kernels.ExpKernel._convolve_single_t)
@@ -576,13 +579,16 @@ class GIF_spiking(models.Model):
     def λ_fn(self, t):
         """Hazard rate. Eq. (23)."""
         # TODO: Use self.f here (requires overloading of ops to remove pop_rmul & co.)
-        return (self.params.c * shim.exp(  (self.u[t] - self.varθ[t]) / self.params.Δu ) ).expand_axis(-1, 'Micro').values
+        t_u = self.λ.get_t_for(t, self.u)
+        t_varθ = self.λ.get_t_for(t, self.varθ)
+        return (self.params.c * shim.exp(  (self.u[t_u] - self.varθ[t_varθ]) / self.params.Δu ) ).expand_axis(-1, 'Micro').values
 
     def s_fn(self, t):
         """Spike generation"""
+        t_λ = self.s.get_t_for(t, self.λ)
         return ( self.rndstream.binomial( size = self.s.shape,
                                           n = 1,
-                                          p = sinn.clip_probabilities(self.λ[t]*self.s.dt) )
+                                          p = sinn.clip_probabilities(self.λ[t_λ]*self.s.dt) )
                  .nonzero()[0].astype(self.s.idx_dtype) )
             # nonzero returns a tuple, with oner element per axis
 
@@ -1708,7 +1714,8 @@ class GIF_mean_field(models.Model):
 
     def A_fn(self, t):
         """p. 52"""
-        return self.n[t] / (self.params.N * self.A.dt)
+        t_n = self.A.get_t_for(t, self.n)
+        return self.n[t_n] / (self.params.N * self.A.dt)
 
     def h_fn(self, t):
         """p.53, also Eq. 92 p. 48"""
@@ -1741,32 +1748,36 @@ class GIF_mean_field(models.Model):
         Note that the pseudocode on p. 52 includes the u_rest term, whereas in Eq. 94
         this term is instead included in the equation for h (Eq. 92). We follow the pseudocode here.
         """
+        t_AΔ = self.h_tot.get_t_for(t, self.A_Δ)
+        t_y = self.h_tot.get_t_for(t, self.y)
+        t_Iext = self.h_tot.get_t_for(t, self.I_ext)
         # FIXME: Check again that indices are OK (i.e. should they be ±1 ?)
         τ_m = self.params.τ_m.flatten()[:,np.newaxis]
            # We have τ_sβ, but τ_mα. This effectively transposes τ_m
         red_factor_τm = shim.exp(-self.h_tot.dt/self.params.τ_m)
         red_factor_τmT = shim.exp(-self.h_tot.dt/τ_m)
         red_factor_τs = shim.exp(-self.h_tot.dt/self.params.τ_s)
-        return ( self.params.u_rest + self.params.R*self.I_ext[t] * (1 - red_factor_τm)
+        return ( self.params.u_rest + self.params.R*self.I_ext[t_Iext] * (1 - red_factor_τm)
                  + ( τ_m * (self.params.p * self.params.w) * self.params.N
-                       * (self.A_Δ[t]
-                          + ( ( self.params.τ_s * red_factor_τs * ( self.y[t] - self.A_Δ[t] )
-                                - red_factor_τmT * (self.params.τ_s * self.y[t] - τ_m * self.A_Δ[t]) )
+                       * (self.A_Δ[t_AΔ]
+                          + ( ( self.params.τ_s * red_factor_τs * ( self.y[t_y] - self.A_Δ[t_AΔ] )
+                                - red_factor_τmT * (self.params.τ_s * self.y[t_y] - τ_m * self.A_Δ[t_AΔ]) )
                               / (self.params.τ_s - τ_m) ) )
                    ).sum(axis=-1) )
 
     def y_fn(self, t):
         """p.52, line 11"""
         tidx_y = self.y.get_t_idx(t)
+        t_AΔ = self.y.get_t_for(t, self.A_Δ)
         red_factor = shim.exp(-self.y.dt/self.params.τ_s)
-        return self.A_Δ[t] + (self.y[tidx_y-1] - self.A_Δ[t]) * red_factor
+        return self.A_Δ[t_AΔ] + (self.y[tidx_y-1] - self.A_Δ[t_AΔ]) * red_factor
 
     # TODO: g and varθ: replace flatten by sum along axis=1
 
     def g_fn(self, t):
         """p. 53, line 5, also p. 45, Eq. 77b"""
         tidx_g = self.g.get_t_idx(t)
-        tidx_n = self.n.get_t_idx(t)
+        tidx_n = self.g.get_tidx_for(t, self.n)
         # TODO: cache the reduction factor
         # FIXME: Not sure if this should be tidx_n-self.K-1
         red_factor = shim.exp(- self.g.dt/self.params.τ_θ)  # exponential reduction factor
@@ -1778,18 +1789,21 @@ class GIF_mean_field(models.Model):
         """p. 53, line 6 and p. 45 Eq. 77a"""
         #tidx_varθ = self.varθ.get_t_idx(t)
         # TODO: cache reduction factor
+        t_g = self.varθfree.get_t_for(t, self.g)
         red_factor = (self.params.J_θ * shim.exp(-self.memory_time/self.params.τ_θ)).flatten()
-        return self.params.u_th + red_factor * self.g[t]
+        return self.params.u_th + red_factor * self.g[t_g]
             # TODO: sum over exponentials (l) of the threshold kernel
 
     def λfree_fn(self, t):
         """p. 53, line 8"""
+        t_h = self.λfree.get_t_for(t, self.h)
+        t_varθfree = self.λfree.get_t_for(t, self.varθfree)
         # FIXME: 0 or -1 ?
         return self.f(self.h[t] - self.varθfree[t][0])
 
     def Pfree_fn(self, t):
         """p. 53, line 9"""
-        tidx_λ = self.λfree.get_t_idx(t,)
+        tidx_λ = self.Pfree.get_tidx_for(t, self.λfree)
         #self.λfree.compute_up_to(tidx_λ)
             # HACK: force Theano to compute up to tidx_λ first
             #       This is required because of the hack in History.compute_up_to
@@ -1799,7 +1813,8 @@ class GIF_mean_field(models.Model):
     def X_fn(self, t):
         """p. 53, line 12"""
         #tidx_m = self.m.get_t_idx(t)
-        return (self.m[t]).sum(axis=-2)
+        t_m = self.X.get_t_for(t, self.m)
+        return (self.m[t_m]).sum(axis=-2)
             # axis 0 is for lags, axis 1 for populations
             # FIXME: includes the absolute ref. lags
 
@@ -1807,7 +1822,8 @@ class GIF_mean_field(models.Model):
         """p.53, line 11, 15 and 16, and Eqs. 97, 98 (p.48)"""
         # FIXME: does not correctly include cancellation from line 11
         # FIXME: t-self.K+1:t almost certainly wrong
-        tidx_n = self.n.get_t_idx(t)
+        t_varθfree = self.varθ.get_t_for(t, self.varθfree)
+        tidx_n = self.varθ.get_tidx_for(t, self.n)
         K = self.u.shape[0]
         # HACK: use of ._data to avoid indexing θtilde (see comment where it is created)
         # TODO: Exclude the last element from the sum, rather than subtracting it.
@@ -1817,26 +1833,29 @@ class GIF_mean_field(models.Model):
 
         # FIXME: Use indexing that is robust to θtilde_dis' t0idx
         # FIXME: Check that this is really what line 15 says
-        return self.θ_dis._data[:K] + self.varθfree[t] + varθref
+        return self.θ_dis._data[:K] + self.varθfree[t_varθfree] + varθref
 
     def u_fn(self, t):
         """p.53, line 17 and 35"""
-        tidx_u = self.u.get_t_idx(t)
+        tidx_u = self.u.get_tidx(t)
+        t_htot = self.u.get_t_for(t, self.h_tot)
         red_factor = shim.exp(-self.u.dt/self.params.τ_m).flatten()[np.newaxis, ...]
         # TODO: Fix for array t
         return shim.concatenate(
             ( self.params.u_r[..., np.newaxis, :],
-              ((self.u[tidx_u-1][:-1] - self.params.u_rest[np.newaxis, ...]) * red_factor + self.h_tot[t][np.newaxis,...]) ),
+              ((self.u[tidx_u-1][:-1] - self.params.u_rest[np.newaxis, ...]) * red_factor + self.h_tot[t_htot][np.newaxis,...]) ),
             axis=-2)
 
     #def λtilde_fn(self, t):
     def λ_fn(self, t):
         """p.53, line 18"""
-        return self.f(self.u[t] - self.varθ[t]) * self.ref_mask
+        t_u = self.λ.get_t_for(t, self.u)
+        t_varθ = self.λ.get_t_for(t, self.varθ)
+        return self.f(self.u[t_u] - self.varθ[t]) * self.ref_mask
 
     def P_λ_fn(self, t):
         """p.53, line 19"""
-        tidx_λ = self.λ.get_t_idx(t)
+        tidx_λ = self.P_λ.get_tidx_for(t)
         #self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
         if shim.isscalar(t):
             slice_shape = (1,) + self.λ.shape[1:]
@@ -1862,14 +1881,15 @@ class GIF_mean_field(models.Model):
     def Y_fn(self, t):
         """p.53, line 22"""
         #tidx_Y = self.Y.get_t_idx(t)
-        tidx_v = self.v.get_t_idx(t)
+        tidx_v = self.Y.get_tidx_for(t, self.v)
+        t_Pλ = self.Y.get_t_for(t, self.P_λ)
         return (self.P_λ[t] * self.v[tidx_v - 1]).sum(axis=-2)
             # FIXME: includes abs. refractory lags
 
     def Z_fn(self, t):
         """p.53, line 23"""
         #tidx_Z = self.Z.get_t_idx(t)
-        tidx_v = self.v.get_t_idx(t)
+        tidx_v = self.Z.get_tidx_for(t, self.v)
         return self.v[tidx_v-1].sum(axis=-2)
             # FIXME: includes abs. refractory lags
 
@@ -1884,13 +1904,14 @@ class GIF_mean_field(models.Model):
 
     def v_fn(self, t):
         """p.53, line 25 and 34"""
-        tidx_v = self.v.get_t_idx(t)
-        tidx_m = self.m.get_t_idx(t)
+        tidx_v = self.v.get_tidx(t)
+        tidx_m = self.v.get_tidx_for(t, self.m)
+        t_Pλ = self.v.get_tidx_for(t, self.P_λ)
         if shim.isscalar(t):
             slice_shape = (1,) + self.v.shape[1:]
             return shim.concatenate(
                 ( shim.zeros(slice_shape, dtype=shim.config.floatX),
-                  (1 - self.P_λ[t][1:])**2 * self.v[tidx_v-1][:-1] + self.P_λ[t][1:] * self.m[tidx_m-1][:-1]
+                  (1 - self.P_λ[t_Pλ][1:])**2 * self.v[tidx_v-1][:-1] + self.P_λ[t_Pλ][1:] * self.m[tidx_m-1][:-1]
                 ),
                 axis=0)
         else:
@@ -1898,15 +1919,15 @@ class GIF_mean_field(models.Model):
             slice_shape = t.shape + (1,) + self.v.shape[1:]
             return shim.concatenate(
                 ( shim.zeros(slice_shape, dtype=shim.config.floatX),
-                  (1 - self.P_λ[t][:,1:])**2 * self.v[tidx_v-1][:,:-1] + self.P_λ[t][:,1:] * self.m[tidx_m-1][:,:-1]
+                  (1 - self.P_λ[t_Pλ][:,1:])**2 * self.v[tidx_v-1][:,:-1] + self.P_λ[t_Pλ][:,1:] * self.m[tidx_m-1][:,:-1]
                 ),
                 axis=1)
 
     def m_fn(self, t):
         """p.53, line 26 and 33"""
-        tidx_m = self.m.get_t_idx(t)
-        tidx_Pλ = self.P_λ.get_t_idx(t)
-        tidx_n = self.n.get_t_idx(t)
+        tidx_m = self.m.get_tidx(t)
+        tidx_Pλ = self.m.get_tidx_for(t, self.P_λ)
+        tidx_n = self.n.get_tidx_for(t, self.n)
         # TODO: update m_0 with n(t)
         # TODO: fix shape if t is array
         return shim.concatenate(
@@ -1917,41 +1938,51 @@ class GIF_mean_field(models.Model):
 
     def P_Λ_fn(self, t):
         """p.53, line 28"""
-        tidx_z = self.z.get_t_idx(t)
+        tidx_z = self.P_Λ.get_tidx_for(t, self.z)
+        t_Y = self.P_Λ.get_t_for(t, self.Y)
+        t_Pfree = self.P_Λ.get_t_for(t, self.Pfree)
         z = self.z[tidx_z-1] # Hack: Don't trigger computation of z 'up to' t-1
         Z = self.Z[t]
         return shim.switch( Z + z > 0,
-                            ( (self.Y[t] + self.Pfree[t]*z)
+                            ( (self.Y[t_Y] + self.Pfree[t_Pfree]*z)
                               / (shim.abs(Z + z) + sinn.config.abs_tolerance) ),
                             0 )
 
     def nbar_fn(self, t):
         """p.53, line 29"""
-        return ( self.W[t] + self.Pfree[t] * self.x[t]
-                 + self.P_Λ[t] * (self.params.N - self.X[t] - self.x[t]) )
+        t_W = self.nbar.get_t_for(t, self.W)
+        t_Pfree = self.nbar.get_t_for(t, self.Pfree)
+        t_x = self.nbar.get_t_for(t, self.x)
+        t_PΛ = self.nbar.get_t_for(t, self.P_Λ)
+        t_X = self.nbar.get_t_for(t, self.X)
+        return ( self.W[t_W] + self.Pfree[t_Pfree] * self.x[t_x]
+                 + self.P_Λ[t_PΛ] * (self.params.N - self.X[t_X] - self.x[t_x]) )
 
     def n_fn(self, t):
         """p.53, lines 30 and 33"""
+        t_nbar = self.n.get_t_for(t, self.nbar)
         return self.rndstream.binomial( size = self.n.shape,
                                         n = self.params.N,
-                                        p = sinn.clip_probabilities(self.nbar[t]/self.params.N) ).astype(self.params.N.dtype)
+                                        p = sinn.clip_probabilities(self.nbar[t_nbar]/self.params.N) ).astype(self.params.N.dtype)
             # If N.dtype < int64, casting as params.N.dtype allows to reduce the memory footprint
             # (and n may never be larger than N)
 
     def z_fn(self, t):
         """p.53, line 31"""
-        tidx_x = self.x.get_t_idx(t)
+        tidx_x = self.z.get_tidx_for(t, self.x)
         #tidx_v = self.v.get_t_idx(t)
-        tidx_z = self.z.get_t_idx(t)
-        return ( (1 - self.Pfree[t])**2 * self.z[tidx_z-1]
-                 + self.Pfree[t]*self.x[tidx_x-1]
-                 + self.v[t][0] )
+        tidx_z = self.z.get_tidx(t)
+        t_Pfree = self.z.get_t_for(t, self.P_free)
+        t_v = self.z.get_t_for(t, self.v)
+        return ( (1 - self.Pfree[t_Pfree])**2 * self.z[tidx_z-1]
+                 + self.Pfree[t_Pfree]*self.x[tidx_x-1]
+                 + self.v[t_v][0] )
 
     def x_fn(self, t):
         """p.53, line 32"""
-        tidx_x = self.x.get_t_idx(t)
-        tidx_m = self.m.get_t_idx(t)
-        tidx_P = self.Pfree.get_t_idx(t)
+        tidx_x = self.x.get_tidx(t)
+        tidx_m = self.x.get_tidx_for(t, self.m)
+        tidx_P = self.Pfree.get_tidx_P(t, self.P)
         # TODO: ensure that m can be used as single time buffer, perhaps
         #       by merging the second line with m_fn update ?
         return ( (1 - self.Pfree[tidx_P]) * self.x[tidx_x-1]
