@@ -8,6 +8,7 @@ import mackelab.parameters
 import mackelab.iotools as iotools
 import sinn
 from sinn.histories import Series, Spiketrain
+import sinn.analyze as anlz
 
 from fsGIF import core
 logger = core.logger
@@ -142,14 +143,15 @@ if __name__ == "__main__":
 
         # Compute the expected activity (i.e. effective firing rate)
         logger.debug("Computing effective firing rate from spike data")
-        ahist = Series(Ahist, iterative=False)
-        slcs = shist.pop_slices
-        def afunc(t):
-            λ = np.array(model.λ[t])
-            a = np.empty(λ.shape[:-1] + ahist.shape)
-            for i, slc in enumerate(shist.pop_slices):
-                a[..., i] = λ[..., slc].mean(axis=-1)
-            return a
-        ahist.set_update_function(afunc)
-        ahist.set()
+        # ahist = Series(Ahist, iterative=False)
+        # slcs = shist.pop_slices
+        # def afunc(t):
+        #     λ = np.array(model.λ[t])
+        #     a = np.empty(λ.shape[:-1] + ahist.shape)
+        #     for i, slc in enumerate(shist.pop_slices):
+        #         a[..., i] = λ[..., slc].mean(axis=-1)
+        #     return a
+        # ahist.set_update_function(afunc)
+        # ahist.set()
+        ahist = anlz.mean(model.λ, shist.pop_slices)
         iotools.save(spike_a_filename, ahist, format='npr')
