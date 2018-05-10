@@ -81,7 +81,7 @@ def generate_spikes(mgr):
     # cost to doing this.
     logger.info("Generating new spike data...")
     #shist.set()
-    for i in tqdm(range(spiking_model.t0idx, spiking_model.tnidx),
+    for i in tqdm(range(spiking_model.t0idx, spiking_model.tnidx+1),
                   position=mgr.args.threadidx):
         spiking_model.advance(i)
     logger.info("Done.")
