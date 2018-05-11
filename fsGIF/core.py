@@ -942,13 +942,13 @@ def subsample(hist, target_dt, max_len = None):
     """
     newhist = anlz.subsample(hist, np.rint(target_dt / hist.dt).astype('int'))
     if max_len is not None:
-        idx = newhist.get_t_idx(max_len)
-        if idx < len(newhist._tarr) - 1:
-            newhist._unpadded_length = idx - newhist.t0idx + 1
-            newhist._original_data = shim.shared(np.array(newhist._original_data[:idx+1]))
+        Δidx = newhist.index_interval(max_len)
+        if Δidx < len(newhist._tarr) - 1:
+            newhist._unpadded_length = Δidx + 1
+            newhist._original_data = shim.shared(np.array(newhist._original_data[:Δidx+1]))
             newhist._data = hist._original_data
-            newhist._tarr = np.array(hist._tarr[:idx+1])
-            newhist.tn = hist._tarr[-1]
+            newhist._tarr = np.array(newhist._tarr[:Δidx+1])
+            newhist.tn = newhist._tarr[-1]
 
     newhist.lock()
 

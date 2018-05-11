@@ -881,12 +881,13 @@ class GIF_mean_field(models.Model):
         n -> A to A -> n and fills the n array
         WARNING: We've hidden the dependency on params.N here.
         """
+
         assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1)
         self.n.clear_inputs()
         # TODO: use op
         #self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
-        self.n.pad(self.A.t0idx)
-        self.A.pad(self.n.t0idx)  # Increase whichever has less padding
+        self.n.pad(*self.A.padding)
+        self.A.pad(*self.n.padding)  # Increase whichever has less padding
         N = shim.cast(self.params.N, self.A.dtype)
             # Do cast first to keep multiplication on same type
             # (otherwise, float32 * int32 => float64)
@@ -1719,16 +1720,16 @@ class GIF_mean_field(models.Model):
 
     def h_fn(self, t):
         """p.53, also Eq. 92 p. 48"""
-
         tidx_h = self.h.get_t_idx(t)
+        t_htot = self.h.get_t_for(t, self.h_tot)
         #tidx_h_tot = self.h_tot.get_t_idx(t)
         red_factor = shim.exp(-self.h.dt/self.params.τ_m.flatten() )
         return ( (self.h[tidx_h-1] - self.params.u_rest) * red_factor
-                 + self.h_tot[t] )
+                 + self.h_tot[t_htot] )
 
     def A_Δ_fn(self, t):
         """p.52, line 9"""
-        tidx_A = self.A.get_t_idx(t)
+        tidx_A = self.A_Δ.get_t_for(t, self.A)
         # a = lambda α: [ self.A[tidx_A - self.Δ_idx[α, β]][β:β+1, np.newaxis]
         #                 for β in range(self.Npops) ]
         # b = lambda α: shim.concatenate( a(α), axis=1)
@@ -1799,7 +1800,7 @@ class GIF_mean_field(models.Model):
         t_h = self.λfree.get_t_for(t, self.h)
         t_varθfree = self.λfree.get_t_for(t, self.varθfree)
         # FIXME: 0 or -1 ?
-        return self.f(self.h[t] - self.varθfree[t][0])
+        return self.f(self.h[t_h] - self.varθfree[t_varθfree][0])
 
     def Pfree_fn(self, t):
         """p. 53, line 9"""
@@ -1851,11 +1852,11 @@ class GIF_mean_field(models.Model):
         """p.53, line 18"""
         t_u = self.λ.get_t_for(t, self.u)
         t_varθ = self.λ.get_t_for(t, self.varθ)
-        return self.f(self.u[t_u] - self.varθ[t]) * self.ref_mask
+        return self.f(self.u[t_u] - self.varθ[t_varθ]) * self.ref_mask
 
     def P_λ_fn(self, t):
         """p.53, line 19"""
-        tidx_λ = self.P_λ.get_tidx_for(t)
+        tidx_λ = self.P_λ.get_tidx_for(t, self.λ)
         #self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
         if shim.isscalar(t):
             slice_shape = (1,) + self.λ.shape[1:]
@@ -1880,10 +1881,9 @@ class GIF_mean_field(models.Model):
 
     def Y_fn(self, t):
         """p.53, line 22"""
-        #tidx_Y = self.Y.get_t_idx(t)
         tidx_v = self.Y.get_tidx_for(t, self.v)
         t_Pλ = self.Y.get_t_for(t, self.P_λ)
-        return (self.P_λ[t] * self.v[tidx_v - 1]).sum(axis=-2)
+        return (self.P_λ[t_Pλ] * self.v[tidx_v - 1]).sum(axis=-2)
             # FIXME: includes abs. refractory lags
 
     def Z_fn(self, t):
@@ -1895,11 +1895,11 @@ class GIF_mean_field(models.Model):
 
     def W_fn(self, t):
         """p.53, line 24"""
-        #tidx_W = self.W.get_t_idx(t)
-        #tidx_m = self.m.get_t_idx(t)
+        t_Pλ = self.W.get_t_for(t, self.P_λ)
+        t_m = self.W.get_t_for(t, self.m)
         ref_mask = self.ref_mask[:self.m.shape[0],:]
             # ref_mask is slightly too large, so we truncate it
-        return (self.P_λ[t] * self.m[t] * ref_mask).sum(axis=-2)
+        return (self.P_λ[t_Pλ] * self.m[t_m] * ref_mask).sum(axis=-2)
             # FIXME: includes abs. refractory lags
 
     def v_fn(self, t):
@@ -1926,23 +1926,24 @@ class GIF_mean_field(models.Model):
     def m_fn(self, t):
         """p.53, line 26 and 33"""
         tidx_m = self.m.get_tidx(t)
-        tidx_Pλ = self.m.get_tidx_for(t, self.P_λ)
+        t_Pλ = self.m.get_t_for(t, self.P_λ)
         tidx_n = self.n.get_tidx_for(t, self.n)
         # TODO: update m_0 with n(t)
         # TODO: fix shape if t is array
         return shim.concatenate(
             ( self.n[tidx_n-1][np.newaxis,:],
-              ((1 - self.P_λ._data[tidx_Pλ][1:]) * self.m[tidx_m-1][:-1]) ),
+              ((1 - self.P_λ._data[t_Pλ][1:]) * self.m[tidx_m-1][:-1]) ),
             axis=-2 )
             # HACK: Index P_λ data directly to avoid triggering its computational update before v_fn
 
     def P_Λ_fn(self, t):
         """p.53, line 28"""
         tidx_z = self.P_Λ.get_tidx_for(t, self.z)
+        t_Z = self.P_Λ.get_t_for(t, self.Z)
         t_Y = self.P_Λ.get_t_for(t, self.Y)
         t_Pfree = self.P_Λ.get_t_for(t, self.Pfree)
         z = self.z[tidx_z-1] # Hack: Don't trigger computation of z 'up to' t-1
-        Z = self.Z[t]
+        Z = self.Z[t_Z]
         return shim.switch( Z + z > 0,
                             ( (self.Y[t_Y] + self.Pfree[t_Pfree]*z)
                               / (shim.abs(Z + z) + sinn.config.abs_tolerance) ),
@@ -1972,7 +1973,7 @@ class GIF_mean_field(models.Model):
         tidx_x = self.z.get_tidx_for(t, self.x)
         #tidx_v = self.v.get_t_idx(t)
         tidx_z = self.z.get_tidx(t)
-        t_Pfree = self.z.get_t_for(t, self.P_free)
+        t_Pfree = self.z.get_t_for(t, self.Pfree)
         t_v = self.z.get_t_for(t, self.v)
         return ( (1 - self.Pfree[t_Pfree])**2 * self.z[tidx_z-1]
                  + self.Pfree[t_Pfree]*self.x[tidx_x-1]
@@ -1982,7 +1983,7 @@ class GIF_mean_field(models.Model):
         """p.53, line 32"""
         tidx_x = self.x.get_tidx(t)
         tidx_m = self.x.get_tidx_for(t, self.m)
-        tidx_P = self.Pfree.get_tidx_P(t, self.P)
+        tidx_P = self.x.get_tidx_for(t, self.Pfree)
         # TODO: ensure that m can be used as single time buffer, perhaps
         #       by merging the second line with m_fn update ?
         return ( (1 - self.Pfree[tidx_P]) * self.x[tidx_x-1]
