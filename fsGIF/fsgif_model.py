@@ -245,6 +245,7 @@ class GIF_spiking(models.Model):
                                      dtype=shim.config.floatX)
         self.K = np.rint( self.memory_time / self.dt ).astype(int)
         self.s.pad(self.memory_time)
+        self.s.memory_time = self.memory_time
         # Pad because these are ODEs (need initial condition)
         #self.u.pad(1)
         #self.t_hat.pad(1)
@@ -677,8 +678,8 @@ class GIF_mean_field(models.Model):
                      # Code currently does not allow for Nθ > 1
 
         # Kernels
-        shape2d = (self.Npops, self.Npops)
-        self.ε = Kernel_ε('ε', self.params, shape=shape2d)
+        # shape2d = (self.Npops, self.Npops)
+        # self.ε = Kernel_ε('ε', self.params, shape=shape2d)  # Not used: Exponential is hard-coded
         self.θ1 = Kernel_θ1('θ1', self.params, shape=(self.Npops,))
         self.θ2 = Kernel_θ2('θ2', self.params, shape=(self.Npops,))
             # Temporary; created to compute its memory time
@@ -1160,14 +1161,22 @@ class GIF_mean_field(models.Model):
                        iterative = False,
                        dtype=shim.config.floatX)
             # Starts at dt because memory buffer does not include current time
-        θ_dis.set_update_function(
-            lambda t: np.sum( (kernel.eval(t) for kernel in θ),
-                              dtype=shim.config.floatX ).astype(shim.config.floatX) )
+
+        # TODO: Use a history's `discretize_kernel` (prob. refhist)
+        # TODO: Kernels should batch-update by default, so in theory we could
+        # use update functions / arithmetic expressions instead of `set`ting
+        # directly
+
+        # θ_dis.set_update_function(
+        #     lambda t: np.sum( (kernel.eval(t) for kernel in θ),
+        #                       dtype=shim.config.floatX ).astype(shim.config.floatX) )
+        θ_data = shim.sum([kernel.eval(θ_dis._tarr) for kernel in θ], axis=0,
+                          dtype=shim.config.floatX).astype(shim.config.floatX)
             # If t is float64, specifying dtype inside sum() isn't always enough, so we astype as well
         # HACK Currently we only support updating by one history timestep
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
-        θ_dis.set()
+        θ_dis.set(θ_data)
         # HACK θ_dis updates should not be part of the loglikelihood's computational graph
         #      but 'already there'
         if shim.is_theano_object(θ_dis._data):
@@ -1179,24 +1188,25 @@ class GIF_mean_field(models.Model):
         # TODO: Use operations
         θtilde_dis = Series(θ_dis, 'θtilde_dis', iterative=False)
         # HACK Proper way to ensure this would be to specify no. of bins (instead of tn) to history constructor
-        if len(θ_dis) != len(θtilde_dis):
-            θtilde_dis._tarr = copy.copy(θ_dis._tarr)
-            θtilde_dis._original_data.set_value(shim.zeros_like(θ_dis._original_data.get_value()))
-            θtilde_dis._data = θtilde_dis._original_data
-            θtilde_dis.tn = θtilde_dis._tarr[-1]
-            θtilde_dis._unpadded_length = len(θtilde_dis._tarr)
+        # if len(θ_dis) != len(θtilde_dis):
+        #     θtilde_dis._tarr = copy.copy(θ_dis._tarr)
+        #     θtilde_dis._original_data.set_value(shim.zeros_like(θ_dis._original_data.get_value()))
+        #     θtilde_dis._data = θtilde_dis._original_data
+        #     θtilde_dis.tn = θtilde_dis._tarr[-1]
+        #     θtilde_dis._unpadded_length = len(θtilde_dis._tarr)
         # HACK θ_dis._data should be θ_dis; then this can be made a lambda function
-        def θtilde_upd_fn(t):
-            tidx = θ_dis.get_t_idx(t)
-            return params.Δu * (1 - shim.exp(-θ_dis._data[tidx]/params.Δu) ) / params.N
-        θtilde_dis.set_update_function(θtilde_upd_fn)
+        # def θtilde_upd_fn(t):
+        #     tidx = θ_dis.get_t_idx(t)
+        #     return params.Δu * (1 - shim.exp(-θ_dis._data[tidx]/params.Δu) ) / params.N
+        # θtilde_dis.set_update_function(θtilde_upd_fn)
         # self.θtilde_dis.set_update_function(
         #     lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis._data[t]/self.params.Δu) ) / self.params.N )
+        θtilde_data = params.Δu * (1 - shim.exp(-θ_data/params.Δu) ) / params.N
 
         # HACK Currently we only support updating by one histories timestep
         #      at a time (Theano), so for kernels (which are fully computed
         #      at any time step), we index the underlying data tensor
-        θtilde_dis.set()
+        θtilde_dis.set(θtilde_data)
         # HACK θ_dis updates should not be part of the loglikelihood's computational graph
         #      but 'already there'
         if shim.is_theano_object(θtilde_dis._data):
@@ -1380,7 +1390,8 @@ class GIF_mean_field(models.Model):
         return η
 
     def get_silent_latent_state(self):
-        K = self.varθ.shape[0]
+        # K = self.varθ.shape[0]
+        K = self.K
         state = self.LatentState(
             h = self.params.u_rest.get_value(),
             #h_tot = np.zeros(self.h_tot.shape),
@@ -1498,91 +1509,91 @@ class GIF_mean_field(models.Model):
                 #     hist._original_tidx.set_value( valslice.stop - 1 )
                 #     hist._cur_tidx = hist._original_tidx
 
-    @property
-    def _advance(self):
-        """
-        Attribute which caches the compilation of the advance function.
-        """
-        if not hasattr(self, '_advance_fn'):
-            #curtidx_var = shim.getT().lscalar()
-            stopidx_var = shim.getT().lscalar()
-            #curtidx_var.tag.test_value = 0
-            stopidx_var.tag.test_value = 2
-                # Allow model to work with compute_test_value == 'raise'
-
-            #self._advance_fn = shim.gettheano().function([curtidx_var, stopidx_var],
-            #                                             outputs)
-            self._advance_fn = self.compile_advance_function(stopidx_var)
-        return self._advance_fn
-
-    def compile_advance_function(self, stopidx):
-        logger.info("Compiling advance function.")
-        updates = self.advance_updates(stopidx)
-        fn = shim.graph.compile([stopidx], [], updates = updates)
-        logger.info("Done.")
-        self.theano_reset()
-        return fn
-
-    def advance_updates(self, stopidx):
-        """
-
-        Parameters
-        ----------
-        stopidx: symbolic (int)
-            We want to compute the model up to this point.
-
-        Returns
-        -------
-        Update dictionary:
-            Compiling a function and providing this dictionary as 'updates' will return a function
-            which fills in the histories up to `stopidx`.
-        """
-        self.remove_other_histories()  # HACK
-        self.clear_unlocked_histories()
-        self.theano_reset()
-
-        if len(self.statehists) == 0:
-            raise NotImplementedError
-        elif len(self.statehists) == 1:
-            hist = self.statehists[0]
-            startidx = hist._original_tidx - hist.t0idx + self.t0idx
-        else:
-            startidx = shim.smallest( *( hist._original_tidx - hist.t0idx + self.t0idx
-                                        for hist in self.statehists ) )
-        try:
-            assert( shim.get_test_value(startidx) >= -1 )
-                # Iteration starts at startidx + 1, and will break for indices < 0
-        except AttributeError:
-            # Unable to find test value; just skip check
-            pass
-
-        def onestep(tidx, *args):
-            statevar_upds, input_vars, output_vars = self.symbolic_update(tidx, args)
-            return list(statevar_upds.values()), {}
-
-        outputs_info = []
-        for hist in self.statehists:
-            outputs_info.append( hist._data[startidx - self.t0idx + hist.t0idx])
-            # HACK-y !!
-            # if hist.name == 'v':
-            #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
-            # elif hist.name == 'z':
-            #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
-
-        outputs, upds = shim.gettheano().scan(onestep,
-                                              sequences = shim.arange(startidx+1, stopidx),
-                                              outputs_info = outputs_info)
-        self.apply_updates(upds)
-            # Applying updates ensures we remove the iteration variable
-            # scan introduces from the shim updates dictionary
-
-        # Update the state variables
-        for hist, output in zip(self.statehists, outputs):
-            valslice = slice(startidx - self.t0idx + hist.t0idx + 1,
-                             stopidx  - self.t0idx + hist.t0idx)
-            hist.update(valslice, output)
-
-        return shim.get_updates()
+    # @property
+    # def _advance(self):
+    #     """
+    #     Attribute which caches the compilation of the advance function.
+    #     """
+    #     if not hasattr(self, '_advance_fn'):
+    #         #curtidx_var = shim.getT().lscalar()
+    #         stopidx_var = shim.getT().lscalar()
+    #         #curtidx_var.tag.test_value = 0
+    #         stopidx_var.tag.test_value = 2
+    #             # Allow model to work with compute_test_value == 'raise'
+    #
+    #         #self._advance_fn = shim.gettheano().function([curtidx_var, stopidx_var],
+    #         #                                             outputs)
+    #         self._advance_fn = self.compile_advance_function(stopidx_var)
+    #     return self._advance_fn
+    #
+    # def compile_advance_function(self, stopidx):
+    #     logger.info("Compiling advance function.")
+    #     updates = self.advance_updates(stopidx)
+    #     fn = shim.graph.compile([stopidx], [], updates = updates)
+    #     logger.info("Done.")
+    #     self.theano_reset()
+    #     return fn
+    #
+    # def advance_updates(self, stopidx):
+    #     """
+    #
+    #     Parameters
+    #     ----------
+    #     stopidx: symbolic (int)
+    #         We want to compute the model up to this point.
+    #
+    #     Returns
+    #     -------
+    #     Update dictionary:
+    #         Compiling a function and providing this dictionary as 'updates' will return a function
+    #         which fills in the histories up to `stopidx`.
+    #     """
+    #     self.remove_other_histories()  # HACK
+    #     self.clear_unlocked_histories()
+    #     self.theano_reset()
+    #
+    #     if len(self.statehists) == 0:
+    #         raise NotImplementedError
+    #     elif len(self.statehists) == 1:
+    #         hist = self.statehists[0]
+    #         startidx = hist._original_tidx - hist.t0idx + self.t0idx
+    #     else:
+    #         startidx = shim.smallest( *( hist._original_tidx - hist.t0idx + self.t0idx
+    #                                     for hist in self.statehists ) )
+    #     try:
+    #         assert( shim.get_test_value(startidx) >= -1 )
+    #             # Iteration starts at startidx + 1, and will break for indices < 0
+    #     except AttributeError:
+    #         # Unable to find test value; just skip check
+    #         pass
+    #
+    #     def onestep(tidx, *args):
+    #         statevar_upds, input_vars, output_vars = self.symbolic_update(tidx, args)
+    #         return list(statevar_upds.values()), {}
+    #
+    #     outputs_info = []
+    #     for hist in self.statehists:
+    #         outputs_info.append( hist._data[startidx - self.t0idx + hist.t0idx])
+    #         # HACK-y !!
+    #         # if hist.name == 'v':
+    #         #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
+    #         # elif hist.name == 'z':
+    #         #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 0)
+    #
+    #     outputs, upds = shim.gettheano().scan(onestep,
+    #                                           sequences = shim.arange(startidx+1, stopidx),
+    #                                           outputs_info = outputs_info)
+    #     self.apply_updates(upds)
+    #         # Applying updates ensures we remove the iteration variable
+    #         # scan introduces from the shim updates dictionary
+    #
+    #     # Update the state variables
+    #     for hist, output in zip(self.statehists, outputs):
+    #         valslice = slice(startidx - self.t0idx + hist.t0idx + 1,
+    #                          stopidx  - self.t0idx + hist.t0idx)
+    #         hist.update(valslice, output)
+    #
+    #     return shim.get_updates()
 
     def remove_other_histories(self):
         """HACK: Remove histories from sinn.inputs that are not in this model."""
@@ -1635,12 +1646,14 @@ class GIF_mean_field(models.Model):
 
         def logLstep(tidx, *args):
             if shim.is_theano_object(tidx):
-                statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[2:])
+                # statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[2:])
+                state_outputs, updates = self.symbolic_update(tidx, args[2:])
                     # FIXME: make this args[1:] once n is in state variables
-                nbar = output_vars[self.nbar]
+                #nbar = output_vars[self.nbar]
+                nbar = self.symbolic_nbar(state_outputs)
             else:
                 nbar = self.nbar[tidx-self.t0idx+self.nbar.t0idx]
-                statevar_updates = {}
+                statevar_updates = []
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
             n = n_full[tidx-self.t0idx+t0idx]
@@ -1651,7 +1664,7 @@ class GIF_mean_field(models.Model):
                                    + (N-n)*shim.log(1-p)
                                   ).sum(dtype=shim.config.floatX)
 
-            return [cum_logL] + [n] + list(statevar_updates.values()), {}
+            return [cum_logL] + [n] + statevar_updates, {}
             # FIXME: Remove [n] once it is included in state vars
             # return [cum_logL], shim.get_updates()
 
@@ -1830,7 +1843,8 @@ class GIF_mean_field(models.Model):
         # FIXME: t-self.K+1:t almost certainly wrong
         t_varθfree = self.varθ.get_t_for(t, self.varθfree)
         tidx_n = self.varθ.get_tidx_for(t, self.n)
-        K = self.u.shape[0]
+        # K = self.u.shape[0]
+        K = self.K
         # HACK: use of ._data to avoid indexing θtilde (see comment where it is created)
         # TODO: Exclude the last element from the sum, rather than subtracting it.
         varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:],
@@ -2095,7 +2109,8 @@ class GIF_mean_field(models.Model):
         varθfree =  self.params.u_th + red_factor * gt
 
         # varθ
-        K = self.u.shape[0]
+        # K = self.u.shape[0]
+        K = self.K
         varθref = ( shim.cumsum(self.n._data[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
                               - self.n._data[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:])[...,::-1,:]
@@ -2123,9 +2138,6 @@ class GIF_mean_field(models.Model):
             ( self.n._data[tidx_n-1][np.newaxis,:], ((1 - P_λt[1:]) * m0[:-1]) ),
             axis=-2 )
 
-        # X
-        X = mt.sum(axis=-2)
-
         # xt
         xt = ( (1 - Pfreet) * x0 + mt[-1] )
 
@@ -2137,25 +2149,6 @@ class GIF_mean_field(models.Model):
 
         # zt
         zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + vt[0] )
-
-        # W
-        Wref_mask = self.ref_mask[:self.m.shape[0],:]
-        W = (P_λt * mt * Wref_mask).sum(axis=-2)
-
-        # Y
-        Y = (P_λt * v0).sum(axis=-2)
-
-        # Z
-        Z = v0.sum(axis=-2)
-
-        # P_Λ
-        P_Λ = shim.switch( Z + z0 > 0,
-                           ( (Y + Pfreet*z0)
-                             / (shim.abs(Z + z0) + sinn.config.abs_tolerance) ),
-                           0 )
-
-        # nbar
-        nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
 
         newstate = self.LatentState(
             h = ht,
@@ -2170,18 +2163,20 @@ class GIF_mean_field(models.Model):
             z = zt
             )
 
-        updates = OrderedDict( (getattr(curstate, key), getattr(newstate, key))
-                               for key in self.LatentState._fields )
+        #state_outputs = OrderedDict( (getattr(curstate, key),
+        #                             for key in self.LatentState._fields )
+        state_outputs = list(newstate)
+        updates = {}
 
-        # TODO: use the key string itself
-        input_vars = OrderedDict( (getattr(self, key), getattr(curstate, key))
-                                  for key in self.LatentState._fields )
+        # # TODO: use the key string itself
+        # input_vars = OrderedDict( (getattr(self, key), getattr(curstate, key))
+        #                           for key in self.LatentState._fields )
 
         # Output variables contain updates to the state variables, as well as
         # whatever other quantities we want to compute
-        output_vars = OrderedDict( (getattr(self, key), getattr(newstate, key))
-                                   for key in self.LatentState._fields )
-        output_vars[self.nbar] = nbar
+#        output_vars = OrderedDict( (getattr(self, key), getattr(newstate, key))
+#                                   for key in self.LatentState._fields )
+#        output_vars[self.nbar] = nbar
 
         # updates = OrderedDict((
         #     (λfree0, λfreet),
@@ -2225,8 +2220,49 @@ class GIF_mean_field(models.Model):
         #                             (self.z, zt),
         #                             (self.nbar, nbar) ))
 
-        return updates, input_vars, output_vars
+        # return updates, input_vars, output_vars
+        return state_outputs, updates
 
+    def symbolic_nbar(self, curstate_list, newstate_list):
+        """
+        This is the part of the logL calculation "downstream" from the
+        calculation of the new state.
+        It takes as inputs two lists of symbolic variables, for the current
+        and new state. Both are in the same order as the 'outputs_info' given
+        to `scan`.
+        """
+        curstate = self.LatentState(*curstate_list)
+        newstate = self.LatentState(*newstate_list)
+        v0 = curstate.v
+        z0 = curstate.z
+        mt = newstate.m
+        xt = newstate.x
+        P_λt = newstate.P_λ
+        Pfreet = newstate.Pfree
+
+        # W
+        Wref_mask = self.ref_mask[:self.m.shape[0],:]
+        W = (P_λt * mt * Wref_mask).sum(axis=-2)
+
+        # X
+        X = mt.sum(axis=-2)
+
+        # Y
+        Y = (P_λt * v0).sum(axis=-2)
+
+        # Z
+        Z = v0.sum(axis=-2)
+
+        # P_Λ
+        P_Λ = shim.switch( Z + z0 > 0,
+                           ( (Y + Pfreet*z0)
+                             / (shim.abs(Z + z0) + sinn.config.abs_tolerance) ),
+                           0 )
+
+        # nbar
+        nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
+
+        return nbar
 
 models.register_model(GIF_spiking)
 models.register_model(GIF_mean_field)
