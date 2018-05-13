@@ -595,12 +595,13 @@ class GIF_spiking(models.Model):
     def t_hat_fn(self, t):
         """Update time since last spike"""
         if shim.isscalar(t):
-            s_tidx_m1 = self.s.get_t_idx(t) - 1
-            t_tidx_m1 = self.t_hat.get_t_idx(t) - 1
+            s_tidx_m1 = self.t_hat.get_tidx_for(t, self.s) - 1
+            t_tidx_m1 = self.t_hat.get_tidx(t) - 1
             cond_tslice = 0
         else:
-            s_tidx_m1 = self.s.time_array_to_slice(t - self.s.dt)
-            t_idx_m1 = self.t_hat.time_array_to_slice(t - self.t.dt)
+            s_t = self.t_hat.get_t_for(t, self.s)
+            s_tidx_m1 = self.s.array_to_slice(s_t, lag=-1)
+            t_tidx_m1 = self.t_hat.array_to_slice(t, lag=-1)
             cond_tslice = slice(None)
         # If the last bin was a spike, set the time to dt (time bin length)
         # Otherwise, add dt to the time
@@ -1748,6 +1749,10 @@ class GIF_mean_field(models.Model):
         """p.52, line 10, or Eq. 94, p. 48
         Note that the pseudocode on p. 52 includes the u_rest term, whereas in Eq. 94
         this term is instead included in the equation for h (Eq. 92). We follow the pseudocode here.
+        DEBUGGGING NOTE: To compare with an equivalent quantity of the spiking model,
+        compare the mean-field's `h_tot - u_rest` to the spiking's
+        `(RI_syn + RI_ext)*(1-e^(Δt/τ_m))`. Use the mean field's Δt (this is
+        input intgrated over a time step, so the steps have to match.)
         """
         t_AΔ = self.h_tot.get_t_for(t, self.A_Δ)
         t_y = self.h_tot.get_t_for(t, self.y)
@@ -1927,7 +1932,7 @@ class GIF_mean_field(models.Model):
         """p.53, line 26 and 33"""
         tidx_m = self.m.get_tidx(t)
         t_Pλ = self.m.get_t_for(t, self.P_λ)
-        tidx_n = self.n.get_tidx_for(t, self.n)
+        tidx_n = self.m.get_tidx_for(t, self.n)
         # TODO: update m_0 with n(t)
         # TODO: fix shape if t is array
         return shim.concatenate(
