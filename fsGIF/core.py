@@ -833,6 +833,8 @@ def get_model_params(params, model_type):
     """Convert a ParameterSet to the internal parameter type used by models.
     Will become deprecated when models use ParameterSet."""
 
+    # Convert to arrays
+    params = ml.parameters.params_to_arrays(params)
 
     # Generate the random connectivity
     #N = np.array((500, 100)) # No. of neurons in each pop
