@@ -1665,13 +1665,13 @@ class GIF_mean_field(models.Model):
         def logLstep(tidx, *args):
             if shim.is_theano_object(tidx):
                 # statevar_updates, input_vars, output_vars = self.symbolic_update(tidx, args[2:])
-                state_outputs, updates = self.symbolic_update(tidx, args[2:])
+                state_outputs, updates = self.symbolic_update(tidx, *args[2:])
                     # FIXME: make this args[1:] once n is in state variables
                 #nbar = output_vars[self.nbar]
-                nbar = self.symbolic_nbar(state_outputs)
+                nbar = self.symbolic_nbar(args[2:], state_outputs)
             else:
                 nbar = self.nbar[tidx-self.t0idx+self.nbar.t0idx]
-                statevar_updates = []
+                state_outputs = []
                 updates = shim.get_updates()
             p = sinn.clip_probabilities(nbar / self.params.N)
             n = n_full[tidx-self.t0idx+t0idx]
@@ -1682,7 +1682,7 @@ class GIF_mean_field(models.Model):
                                    + (N-n)*shim.log(1-p)
                                   ).sum(dtype=shim.config.floatX)
 
-            return [cum_logL] + [n] + statevar_updates, {}
+            return [cum_logL] + [n] + state_outputs, {}
             # FIXME: Remove [n] once it is included in state vars
             # return [cum_logL], shim.get_updates()
 
@@ -2257,12 +2257,27 @@ class GIF_mean_field(models.Model):
         """
         curstate = self.LatentState(*curstate_list)
         newstate = self.LatentState(*newstate_list)
+        λ0 = curstate.λ
+        λfree0 = curstate.λfree
         v0 = curstate.v
         z0 = curstate.z
+        λt = newstate.λ
+        λfreet = newstate.λfree
         mt = newstate.m
         xt = newstate.x
-        P_λt = newstate.P_λ
-        Pfreet = newstate.Pfree
+
+        # Pfreet
+        # TODO: Find way not to repeat this and P_λt from `symbolic_update()`
+        Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet) * self.λfree.dt )
+
+        # P_λt
+        λprev = shim.concatenate(
+            ( shim.zeros((1,) + self.λ.shape[1:], dtype=shim.config.floatX),
+              λ0[:-1] ) )
+        P_λ_tmp = 0.5 * (λt + λprev) * self.P_λ.dt
+        P_λt = shim.switch(P_λ_tmp <= 0.01,
+                           P_λ_tmp,
+                           1 - shim.exp(-P_λ_tmp))
 
         # W
         Wref_mask = self.ref_mask[:self.m.shape[0],:]
