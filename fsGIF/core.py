@@ -942,13 +942,16 @@ def subsample(hist, target_dt, max_len = None):
         If specified as an integer, considered as a number of bins rather
         than time units.
     """
+    if shim.is_theano_object(hist):
+        raise NotImplementedError("Subsampling only implemented for non-"
+                                  "symbolic histories.")
     newhist = anlz.subsample(hist, np.rint(target_dt / hist.dt).astype('int'))
     if max_len is not None:
         Δidx = newhist.index_interval(max_len)
         if Δidx < len(newhist._tarr) - 1:
             newhist._unpadded_length = Δidx + 1
             newhist._original_data = shim.shared(np.array(newhist._original_data[:Δidx+1]))
-            newhist._data = hist._original_data
+            newhist._data = newhist._original_data
             newhist._tarr = np.array(newhist._tarr[:Δidx+1])
             newhist.tn = newhist._tarr[-1]
 
