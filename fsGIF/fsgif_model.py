@@ -693,7 +693,8 @@ class GIF_mean_field(models.Model):
         # Histories
         self.n = Series(self.A, 'n', dtype=self.params.N.dtype)
         self.h = Series(self.A, 'h')
-        self.h_tot = Series(self.A, 'h_tot', symbolic=False)
+        # self.h_tot = Series(self.A, 'h_tot', symbolic=False)
+        self.h_tot = Series(self.A, 'h_tot')
         self.u = Series(self.A, 'u', shape=(self.K, self.Npops))
             # self.u[t][0] is the array of membrane potentials at time t, at lag Δt, of each population
             # TODO: Remove +1: P_λ_fn doesn't need it anymore
@@ -702,7 +703,8 @@ class GIF_mean_field(models.Model):
 
         # Temporary variables
         #self.nbar = Series(self.n, 'nbar', use_theano=False)
-        self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), symbolic=False)
+        # self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops), symbolic=False)
+        self.A_Δ = Series(self.A, 'A_Δ', shape=(self.Npops, self.Npops))
         #self.g = Series(self.A, 'g', shape=(self.Npops, self.Nθ,))
         self.g = Series(self.A, 'g', shape=(self.Npops,))  # HACK: Nθ = 1    # auxiliary variable(s) for the threshold of free neurons. (avoids convolution)
 
@@ -718,18 +720,25 @@ class GIF_mean_field(models.Model):
         #self.λtildefree = Series(self.A, 'λtildefree')
         self.λfree = Series(self.A, 'λfree')
             #TODO: Either just take λtilde in the past, or make λtilde & λfree variables
-        self.Pfree = Series(self.λfree, 'Pfree', symbolic=False)
+        # self.Pfree = Series(self.λfree, 'Pfree', symbolic=False)
+        self.Pfree = Series(self.λfree, 'Pfree')
 
         # Refractory neurons
         self.m = Series(self.u, 'm', shape=(self.K, self.Npops))           # Expected no. neurons for each last-spike bin
             # One more than v, because we need the extra spill-over bin to compute how many neurons become 'free' (Actually, same as v)
-        self.P_λ = Series(self.m, 'P_λ', symbolic=False)
+        # self.P_λ = Series(self.m, 'P_λ', symbolic=False)
+        self.P_λ = Series(self.m, 'P_λ')
         self.v = Series(self.m, 'v', shape=(self.K, self.Npops))
-        self.P_Λ = Series(self.Pfree, 'P_Λ', symbolic=False)
-        self.X = Series(self.A, 'X', symbolic=False)
-        self.Y = Series(self.X, 'Y', symbolic=False)
-        self.Z = Series(self.X, 'Z', symbolic=False)
-        self.W = Series(self.X, 'W', symbolic=False)
+        # self.P_Λ = Series(self.Pfree, 'P_Λ', symbolic=False)
+        # self.X = Series(self.A, 'X', symbolic=False)
+        # self.Y = Series(self.X, 'Y', symbolic=False)
+        # self.Z = Series(self.X, 'Z', symbolic=False)
+        # self.W = Series(self.X, 'W', symbolic=False)
+        self.P_Λ = Series(self.Pfree, 'P_Λ')
+        self.X = Series(self.A, 'X')
+        self.Y = Series(self.X, 'Y')
+        self.Z = Series(self.X, 'Z')
+        self.W = Series(self.X, 'W')
 
         # HACK For propagating gradients without scan
         #      Order must be consistent with return value of symbolic_update
@@ -895,17 +904,24 @@ class GIF_mean_field(models.Model):
             # (otherwise, float32 * int32 => float64)
         ndata = (self.A._data * N * self.A.dt).eval()
         assert(sinn.ismultiple(ndata, 1).all()) # Make sure ndata is all integers
-        self.n.add_input(self.A)
-        self.n.set(ndata.astype(self.params.N.dtype))
+        self.n.symbolic = False
+        self.n._iterative = False
+        self.n.add_input(self.A)  # TODO: Useful ?
+        self.n.set(ndata.round().astype(self.params.N.dtype))
             # TODO: Don't remove dependence on self.param.N
         self.n.lock()
 
         # HACK Everything below
+        self.A_Δ.symbolic = False
+            # `symbolic` should have 'None' value, indicating to deduce from
+            # from inputs (which where would be self.A)
+            # Or it could just return the state of `locked` ?
+        self.A_Δ._iterative = False
         self.A_Δ.set()
-        self.A_Δ._original_data.set_value(self.A_Δ._data.eval())
-        self.A_Δ._data = self.A_Δ._original_data
-        self.A_Δ._original_tidx.set_value(self.A_Δ._cur_tidx.eval())
-        self.A_Δ._cur_tidx = self.A_Δ._original_tidx
+        # self.A_Δ._original_data.set_value(self.A_Δ._data.eval())
+        # self.A_Δ._data = self.A_Δ._original_data
+        # self.A_Δ._original_tidx.set_value(self.A_Δ._cur_tidx.eval())
+        # self.A_Δ._cur_tidx = self.A_Δ._original_tidx
         self.A_Δ.lock()
 
     def get_memory_time(self, kernel, max_time=10):
@@ -1469,19 +1485,21 @@ class GIF_mean_field(models.Model):
             stopidx = self.get_t_idx(stop)
 
         # Make sure we don't go beyond given data
-        for h in self.history_set:
+        for hist in self.history_set:
             # HACK: Should exclude kernels
-            if h.name in ['θ_dis', 'θtilde_dis']:
+            if hist.name in ['θ_dis', 'θtilde_dis']:
                 continue
-            if h.locked:
-                tn = h.get_time(h._original_tidx.get_value())
-                if tn < self._refhist.get_time(stopidx):
+            if hist.locked:
+                tnidx = hist._original_tidx.get_value()
+                if tnidx < stopidx - self.t0idx + hist.t0idx:
                     logger.warning("Locked history '{}' is only provided "
                                    "up to t={}. Output will be truncated."
-                                   .format(h.name, tn))
-                    stopidx = self.nbar.get_t_idx(tn)
+                                   .format(hist.name, hist.get_time(tnidx)))
+                    stopidx = tnidx - hist.t0idx + self.t0idx
 
 
+        # TODO: Check that histories, rather than shim are symbolic ?
+        #       Theano could have been loaded afterwards.
         if not shim.config.use_theano:
             self._refhist.compute_up_to(stopidx - self.t0idx + self._refhist.t0idx)
             for hist in self.statehists:
@@ -1762,7 +1780,7 @@ class GIF_mean_field(models.Model):
         """p.52, line 10, or Eq. 94, p. 48
         Note that the pseudocode on p. 52 includes the u_rest term, whereas in Eq. 94
         this term is instead included in the equation for h (Eq. 92). We follow the pseudocode here.
-        DEBUGGGING NOTE: To compare with an equivalent quantity of the spiking model,
+        DEBUGGING NOTE: To compare with an equivalent quantity of the spiking model,
         compare the mean-field's `h_tot - u_rest` to the spiking's
         `(RI_syn + RI_ext)*(1-e^(Δt/τ_m))`. Use the mean field's Δt (this is
         input intgrated over a time step, so the steps have to match.)
@@ -1879,14 +1897,14 @@ class GIF_mean_field(models.Model):
         #self.λ.compute_up_to(tidx_λ)  # HACK: see Pfree_fn
         if shim.isscalar(t):
             slice_shape = (1,) + self.λ.shape[1:]
-            λprev = np.concatenate( ( np.zeros(slice_shape),
-                                      self.λ[tidx_λ-1][:-1] ),
+            λprev = shim.concatenate( ( shim.zeros(slice_shape),
+                                        self.λ[tidx_λ-1][:-1] ),
                                     axis=0)
         else:
             assert(t.ndim == 1)
             slice_shape = (t.shape[0],) + (1,) + self.λ.shape[1:]
-            λprev = np.concatenate( ( np.zeros(slice_shape, dtype=self.λ.dtype),
-                                      self.λ[tidx_λ-1][:,:-1] ),
+            λprev = shim.concatenate( ( shim.zeros(slice_shape, dtype=self.λ.dtype),
+                                        self.λ[tidx_λ-1][:,:-1] ),
                                     axis=1)
         P_λ = 0.5 * (self.λ[tidx_λ][:] + λprev) * self.P_λ.dt
         return shim.switch(P_λ <= 0.01,
@@ -1981,8 +1999,14 @@ class GIF_mean_field(models.Model):
     def n_fn(self, t):
         """p.53, lines 30 and 33"""
         t_nbar = self.n.get_t_for(t, self.nbar)
-        return self.rndstream.binomial( size = self.n.shape,
-                                        n = self.params.N,
+        if shim.isscalar(t):
+            size = self.n.shape
+            n = self.params.N
+        else:
+            size = t.shape + self.n.shape
+            n = self.params.N[np.newaxis, ...]
+        return self.rndstream.binomial( size = size,
+                                        n = n,
                                         p = sinn.clip_probabilities(self.nbar[t_nbar]/self.params.N) ).astype(self.params.N.dtype)
             # If N.dtype < int64, casting as params.N.dtype allows to reduce the memory footprint
             # (and n may never be larger than N)
@@ -2010,7 +2034,7 @@ class GIF_mean_field(models.Model):
             # HACK: Index P_λ, m _data directly to avoid triggering it's computational udate before v_fn
 
 
-    def symbolic_update(self, tidx, statevars):
+    def symbolic_update(self, tidx, *statevars):
         """
         Temorary fix to get symbolic updates. Eventually sinn should
         be able to do this itself.
