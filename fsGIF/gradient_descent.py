@@ -728,7 +728,7 @@ if __name__ == "__main__":
                                   pymc_priors)
         sgd.initialize_vars(init_vals)
         logger.info("Starting gradient descent fit...")
-        sgd.fit(Nmax=mgr.params.sgd.max_iterations)
+        sgd.fit(Nmax=mgr.params.sgd.max_iterations, threadidx=mgr.args.threadidx)
 
     if not skipped:
         if mgr.args.debug:
