@@ -25,6 +25,7 @@ import mackelab.parameters
 import mackelab.tqdm
 import theano_shim as shim
 import sinn
+import sinn.histories as histories
 import sinn.iotools as iotools
 import sinn.analyze as anlz
 from sinn.analyze.heatmap import HeatMap
@@ -914,6 +915,8 @@ def compute_spike_activity(spike_history, activity_dt=None):
         Time step of the activity trace. Default is to use that of the spike history;
         must be an integer multiple of the latter.
     """
+    if not isinstance(spike_history, histories.Spiketrain):
+        raise TypeError("'spike_history' must be a sinn Spiketrain.")
 
     # Temporarily unload Theano since it isn't supported by spike history
     use_theano = shim.config.use_theano
