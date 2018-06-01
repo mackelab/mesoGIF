@@ -217,8 +217,8 @@ def get_pymc_model(params, model, batch_size):
 
     with ml.pymc3.InitializableModel(setup=setup) as pymc_model:
         priors = ml.pymc3.PyMCPrior(priorparams, modelvars)
-        start = shim.symbolic.scalar('tidx', dtype=model.n.idx_dtype)
-        batch_size_var = shim.symbolic.scalar('batch_size', dtype=model.n.idx_dtype)
+        start = shim.symbolic.scalar('tidx', dtype=model.n.tidx_dtype)
+        batch_size_var = shim.symbolic.scalar('batch_size', dtype=model.n.tidx_dtype)
         start.tag.test_value = 1
             # Must be large enough so that test_value slices are not empty
         batch_size_var.tag.test_value = 2
@@ -289,7 +289,8 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
     model.theano_reset() # TODO: deprecated ?
     model.clear_unlocked_histories()
     sgd = gd.SeriesSGD(
-        cost = shim.cast_floatX(pymc_model.logpt),
+        # cost = shim.cast_floatX(pymc_model.logpt),
+        cost = pymc_model.logpt,
             # FIXME: prior logp's still have dtype='float64', no matter the
             # value of floatX. This is probably due to some internal
             # constants which are double precision.

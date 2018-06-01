@@ -948,7 +948,9 @@ def subsample(hist, target_dt, max_len = None):
     if shim.is_theano_object(hist):
         raise NotImplementedError("Subsampling only implemented for non-"
                                   "symbolic histories.")
-    newhist = anlz.subsample(hist, np.rint(target_dt / hist.dt).astype('int'))
+    amount = np.rint(target_dt / hist.dt).astype('int64')
+    amount = amount.astype(np.min_scalar_type(amount))
+    newhist = anlz.subsample(hist, amount)
     if max_len is not None:
         Δidx = newhist.index_interval(max_len)
         if Δidx < len(newhist._tarr) - 1:

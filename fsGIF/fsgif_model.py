@@ -899,7 +899,7 @@ class GIF_mean_field(models.Model):
         #self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
         self.n.pad(*self.A.padding)
         self.A.pad(*self.n.padding)  # Increase whichever has less padding
-        N = shim.cast(self.params.N, self.A.dtype)
+        N = shim.cast(self.params.N, self.A.dtype, same_kind=False)
             # Do cast first to keep multiplication on same type
             # (otherwise, float32 * int32 => float64)
         ndata = (self.A._data * N * self.A.dt).eval()
@@ -1691,13 +1691,17 @@ class GIF_mean_field(models.Model):
 
             # Create the outputs_info list
             # First element is the loglikelihood, subsequent are aligned with input_vars
-            outputs_info = [shim.cast(0, shim.config.floatX)]
+            outputs_info = [shim.cast(0, shim.config.floatX, same_kind=False)]
 
             # FIXME: Remove once 'n' is in state variables
             outputs_info.append( self.n._data[startidx - self.t0idx + self.n.t0idx - 1] )
 
             for hist in self.statehists:
-                outputs_info.append( hist._data[startidx - self.t0idx + hist.t0idx - 1] )
+                res = sinn.upcast(
+                    hist._data[startidx - self.t0idx + hist.t0idx - 1],
+                    disable_rounding=True)
+                    # upcast is a no-op if it is not needed
+                outputs_info.append(res)
                 # HACK !!
                 # if hist.name == 'v':
                 #     outputs_info[-1] = shim.getT().unbroadcast(outputs_info[-1], 1)
