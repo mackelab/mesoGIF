@@ -709,6 +709,8 @@ if __name__ == "__main__":
 
     # Load the gradient descent class
     model = get_model(mgr.params)
+    # Use double precision for priors. Avoids failures when sampling from tails
+    shim.config.floatX = 'float64'
     pymc_model, pymc_priors, start_var, batch_size_var = \
         get_pymc_model(mgr.params.posterior, model, mgr.params.sgd.batch_size)
     if prev_run is None:

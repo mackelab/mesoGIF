@@ -902,8 +902,9 @@ class GIF_mean_field(models.Model):
         N = shim.cast(self.params.N, self.A.dtype, same_kind=False)
             # Do cast first to keep multiplication on same type
             # (otherwise, float32 * int32 => float64)
-        ndata = (self.A._data * N * self.A.dt).eval()
-        assert(sinn.ismultiple(ndata, 1).all()) # Make sure ndata is all integers
+        ndata = (self.A._data * N * self.A.dt64).eval()
+        assert(sinn.ismultiple(ndata, 1, rtol=self.A.dtype, atol=self.A.dtype).all()) # Make sure ndata is all integers
+            # `rtol`, `atol` ensure we use float32 tolerance if A is float32
         self.n.symbolic = False
         self.n._iterative = False
         self.n.add_input(self.A)  # TODO: Useful ?
