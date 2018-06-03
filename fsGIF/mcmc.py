@@ -56,7 +56,7 @@ class nDist(pymc.distributions.Continuous):
         self.batch_size = batch_size
         self.variables = variables
         # Basic checks on the variables
-        # This catches some errors allows us to exit with a more friendly
+        # This catches some errors which allows us to exit with a more friendly
         # error message than the one Theano would otherwise print
         shape_mismatch = [(key,val) for key, val in variables.items()
                           if key.broadcastable != val.broadcastable]
@@ -72,10 +72,10 @@ class nDist(pymc.distributions.Continuous):
 
     def logp(self, n):
         model_graph = self.model.loglikelihood(self.start, self.batch_size)[0]
-        logp = shim.gettheano().clone(model_graph, self.variables)
+        logp = shim.graph.clone(model_graph, self.variables)
         # Sanity check on logp: ensure all variable names are unique
         varnames = [v.name for v in shim.graph.inputs([logp]) if v.name is not None]
-        counts = {name: varnames.count(name) for name in np.unique(varnames)}
+        counts = {name: varnames.count(name) for name in set(varnames)}
         if any(c > 1 for c in counts.values()):
             names = [name for name, c in counts.items() if c > 1]
             namestr = "name" if len(names) == 1 else "names"
@@ -105,7 +105,7 @@ class Model(pymc.model.Model):
         Function taking no arguments. Will be called just before evaluating
         any compiled function.
     """
-    def __init__(self, name='', setup=None, model=None, theano_config=None):
+    def __init__(self, name='', model=None, theano_config=None, setup=None):
         self.setup = setup
         super().__init__(name=name, model=model, theano_config=theano_config)
 
@@ -166,6 +166,17 @@ def run_mcmc(mgr, model):
         start = get_mle_start(mgr.params.posterior, priors)
         if start is not None:
             kwds['start'] = start
+    if 'trace' in kwds:
+        # Load a trace to start from
+        start_trace_params = kwds['trace']
+        start_trace_params.chain = kwds.chain  # We must continue the same chain number
+        start_trace_filename = mgr.get_pathname(params = start_trace_params,
+                                                subdir = core.RunMgr.subdirs['mcmc'],
+                                                suffix = '',
+                                                label = '')
+        start_trace_filename = "mcmc_debug.dill"
+        kwds['trace'] = ml.pymc3.import_multitrace(ml.iotools.load(start_trace_filename))
+
     with pymc_model:
         trace = pymc.sample(**kwds)
 
@@ -284,4 +295,3 @@ if __name__ == "__main__":
     else:
         mcmc_filename = mgr.get_pathname(label=None)
     ml.iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
-
