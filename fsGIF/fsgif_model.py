@@ -1219,6 +1219,8 @@ class GIF_mean_field(models.Model):
         # self.θtilde_dis.set_update_function(
         #     lambda t: self.params.Δu * (1 - shim.exp(-self.θ_dis._data[t]/self.params.Δu) ) / self.params.N )
         θtilde_data = params.Δu * (1 - shim.exp(-θ_data/params.Δu) ) / params.N
+            # Division by N follows definition in pseudocode; text puts division
+            # in the expression for varθ.
 
         # HACK Currently we only support updating by one histories timestep
         #      at a time (Theano), so for kernels (which are fully computed
@@ -1861,15 +1863,16 @@ class GIF_mean_field(models.Model):
             # FIXME: includes the absolute ref. lags
 
     def varθ_fn(self, t):
-        """p.53, line 11, 15 and 16, and Eqs. 97, 98 (p.48)"""
+        """p.53, line 11, 15 and 16, and Eq. 110 (p.50)"""
+        # Follows pseudocode definitions: (110)'s division by N is already
+        # included in θtilde_dis
         # FIXME: does not correctly include cancellation from line 11
-        # FIXME: t-self.K+1:t almost certainly wrong
         t_varθfree = self.varθ.get_t_for(t, self.varθfree)
         tidx_n = self.varθ.get_tidx_for(t, self.n)
         # K = self.u.shape[0]
         K = self.K
         # HACK: use of ._data to avoid indexing θtilde (see comment where it is created)
-        # TODO: Exclude the last element from the sum, rather than subtracting it.
+        # TODO: sum should be shifted by one index (and first elem 0) instead of subtracting n[t_k]
         varθref = ( shim.cumsum(self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:],
                                 axis=-2)
                     - self.n[tidx_n-K:tidx_n]*self.θtilde_dis._data[:K][...,::-1,:])[...,::-1,:]
