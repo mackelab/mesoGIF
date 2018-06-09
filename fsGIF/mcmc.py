@@ -34,8 +34,6 @@ sinn.config.load_theano()
     # Synchronizes sinn and theano config, notably the floatX setting
     # TODO: Move setting of floatX into shim
 shim.gettheano().config.compute_test_value = 'raise'
-#sinn.config.floatX = 'float32'
-#shim.gettheano().config.floatX = sinn.config.floatX
 
 Transform.namespaces.update({'shim': shim})
 
@@ -178,6 +176,11 @@ def run_mcmc(mgr, model):
         kwds['trace'] = ml.pymc3.import_multitrace(ml.iotools.load(start_trace_filename))
 
     with pymc_model:
+        # shim.config.floatX = 'float64'
+            # Doing calculations with double precision can avoid gradients going
+            # because of numerical errors to zero
+        # if 'nuts_kwargs' not in kwds: kwds['nuts_kwargs'] = {}
+        # kwds['nuts_kwargs']['casting'] = 'same_kind'
         trace = pymc.sample(**kwds)
 
     return trace
@@ -281,6 +284,8 @@ if __name__ == "__main__":
     # TODO: mgr.parser.add_argument('--resume' ...
 
     mgr.load_parameters()
+    if 'floatX' in mgr.params:
+        shim.config.floatX = mgr.params.floatX
 
     if ml.theano.using_gpu():
         logger.info("Theano using GPU")
