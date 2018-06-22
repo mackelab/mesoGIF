@@ -15,7 +15,6 @@ logger = core.logger
 ############################
 # Model import
 from fsGIF import fsgif_model as gif
-gif.homo = False  # HACK
 ############################
 
 sinn.config.set_floatX()
@@ -98,6 +97,17 @@ if __name__ == "__main__":
     mgr.load_parameters()
     spike_filename = core.add_extension(mgr.get_pathname(label=''))
     spike_activity_filename = core.add_extension(mgr.get_pathname(label='', suffix='activity'))
+
+    # Check if we are simulating a heterogeneous population
+    # Definitely HACK-y: the model should not need the `homo` flag in the first place
+    for pname, pval in mgr.params.model.items():
+        if isinstance(pval, dict):
+            # Homogeneous variables should not be distributions
+            # Essentially we are making the assumption that heteregeneous populations
+            # are never set by hand, but always through a sampler
+            assert('shape' in pval) # Sanity check
+            gif.homo = False
+            break
 
     generate_data = False
     try:
