@@ -548,6 +548,9 @@ def get_init_vals(init_params, prior_params, pymc_model, priors):
         seed = getattr(init_params, 'seed', None)
         prior_sampler = ml.parameters.ParameterSetSampler(prior_params, seed)
         init_vals = prior_sampler.sample(priors.keys())
+        # Cast to floatX
+        init_vals = {key: shim.cast_floatX(val)
+                     for key, val in init_vals.items()}
         for name, val in init_vals.items():
             prior = priors[name]
             # Get the transformed variable, which is the one used in the cost graph.
@@ -731,7 +734,8 @@ if __name__ == "__main__":
                                   pymc_priors)
         sgd.initialize_vars(init_vals)
         logger.info("Starting gradient descent fit...")
-        shim.config.floatX = 'float64'
+        if 'floatX' in mgr.params:
+            shim.config.floatX = mgr.params.floatX
         sgd.fit(Nmax=mgr.params.sgd.max_iterations, threadidx=mgr.args.threadidx)
 
     if not skipped:
