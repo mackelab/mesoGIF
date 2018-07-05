@@ -37,8 +37,8 @@ class Kernel_ε(models.ModelKernelMixin, kernels.ExpKernel):
             decay_const = model_params.τ_s,
             t_offset    = model_params.Δ)
 
-# The θ kernel is separated in two: θ_1 is the constant equal to ∞ over (0, t_ref)
-# θ_2 is the exponentially decaying adaptation kernel
+# The θ kernel is separated in two: θ1 is the constant equal to ∞ over (0, t_ref)
+# θ2 is the exponentially decaying adaptation kernel
 class Kernel_θ1(models.ModelKernelMixin, kernels.Kernel):
     Parameter_info = OrderedDict( ( ( 'height', 'floatX' ),
                                     ( 'start',  'floatX' ),
