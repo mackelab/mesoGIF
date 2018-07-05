@@ -300,6 +300,7 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
         optimize_vars = pymc_model.vars,
         track_vars = track_vars,
         advance = model.advance_updates,
+        reset = model.clear_other_histories,
         initialize = model_initialize,
         start = start,
         datalen = datalen,
