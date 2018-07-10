@@ -1626,7 +1626,8 @@ class GIF_mean_field(models.Model):
         for h in dellist:
             del sinn.inputs[h]
 
-    def loglikelihood(self, start, batch_size, data=None):
+    def loglikelihood(self, start, batch_size, data=None,
+                      flags=()):
         """
         Returns
         -------
@@ -1638,10 +1639,31 @@ class GIF_mean_field(models.Model):
             for each variable all the time slices between `start` and `start+batch_size`.
         symbolic update dictionary: dict
             Update dictionary returned by the internal call to `scan()`.
+        flags: iterable of str
+            Flags change the output format. Except when debugging, this should
+            be left to its default value, as other functions may expect its
+            default return format. Possible values:
+            - 'last_logL' (default) | 'all_logL': Return only the last
+              cumulative log likelihood value, or all of them.
+            - 'states' (default) | 'no_states': Return the sequence of state
+              values, or omit it from the input.
+            - 'updates' (default) | 'no_updates': Include the update dictionary
+              returned by `scan()`.
+
 
         TODO: I'm not sure the state variable updates are useful; if really needed,
               that information should be in the update dictionary.
         """
+        # Set the output flags
+        # TODO: Use an enum
+        flag_values = [['last_logL', 'all_logL'],   # Each row corresponds to
+                       ['states', 'no_states'],     # a different option. First
+                       ['updates', 'no_updates']]   # element of row is default.
+        outflags = set()
+        for option in flag_values:
+            # Prepend with the default
+            values = [option[0]] + [f for f in flags if f in option]
+            outflags.add(values[-1])  # Will select default if no option was given
 
         ####################
         # Some hacks to get around current limitations
@@ -1683,7 +1705,8 @@ class GIF_mean_field(models.Model):
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
                                    + n*shim.log(p)
                                    + (N-n)*shim.log(1-p)
-                                  ).sum(dtype=shim.config.floatX)
+                                  ).sum(dtype=shim.config.floatX).astype(shim.config.floatX)
+                                  # Sometimes just setting dtype in sum is not enough
 
             return [cum_logL] + [n] + state_outputs, {}
             # FIXME: Remove [n] once it is included in state vars
@@ -1735,17 +1758,20 @@ class GIF_mean_field(models.Model):
                 # logL = outputs[0]; outputs[1:] => statevars
         else:
             # TODO: Remove this branch once shim.scan is implemented
-            logL = np.zeros(stopidx - startidx)
-            logL[0] = logLstep(startidx, 0)[0][0]
+            logL = np.zeros(stopidx - startidx, dtype=shim.config.floatX)
+            logL[0] = logLstep(startidx, np.array(0, dtype=shim.config.floatX))[0][0]
             for t in np.arange(startidx+1, stopidx):
                 logL[t-startidx] = logLstep(t, logL[t-startidx-1])[0][0]
             upds = shim.get_updates()
 
-            return ( logL[-1],
-                     [ self.n[startidx-self.t0idx+self.n.t0idx : stopidx-self.t0idx+self.n.t0idx] ] +
-                     [ hist[startidx-self.t0idx+hist.t0idx : stopidx-self.t0idx+hist.t0idx]
-                       for hist in self.statehists],
-                     upds )
+            retval = [logL] if 'all_logL' in outflags else [logL[-1]]
+            if 'states' in outflags:
+                retval.append([ self.n[startidx-self.t0idx+self.n.t0idx : stopidx-self.t0idx+self.n.t0idx] ]
+                              + [ hist[startidx-self.t0idx+hist.t0idx : stopidx-self.t0idx+hist.t0idx]
+                                  for hist in self.statehists])
+            if 'updates' in outflags:
+                retval.append( upds )
+            return retval[0] if len(retval) == 1 else retval
 
     def f(self, u):
         """Link function. Maps difference between membrane potential & threshold
