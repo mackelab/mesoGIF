@@ -286,6 +286,21 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
         raise ValueError("Unrecognized cost descriptor '{}'"
                          .format(params.sgd.cost))
 
+    # model_reset is probably not required
+    def model_reset(**kwargs):
+        values = copy.copy(kwargs)
+        # HACK to invert transformations
+        for name, v in kwargs.items():
+            if name[:3] == 'log':
+                nwname = name[3:]; assert(nwname not in values)
+                values[nwname] = 10**v
+                del values[name]
+            if name[-6:] == '_log__':
+                nwname = name[:-6]; assert(nwname not in values)
+                values[nwname] = shim.exp(v)
+                del values[name]
+        return model.update_params(values)
+
     model.theano_reset() # TODO: deprecated ?
     model.clear_unlocked_histories()
     sgd = gd.SeriesSGD(
@@ -300,7 +315,7 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
         optimize_vars = pymc_model.vars,
         track_vars = track_vars,
         advance = model.advance_updates,
-        reset = model.clear_other_histories,
+        reset = None,
         initialize = model_initialize,
         start = start,
         datalen = datalen,
@@ -536,7 +551,7 @@ def get_previous_run(params, resume=True):
             prev_run = None
 
 def get_init_vals(init_params, prior_params, pymc_model, priors):
-    init_vals_format = getattr(init_params, 'format', 'cartesian')
+    init_vals_format = getattr(init_params, 'format', 'fixed')
     init_vals_random = getattr(init_params, 'random', False)
     # if init_vals_random:
     #     if ( 'seed' in init_params and init_params.seed is not None ):
@@ -545,7 +560,7 @@ def get_init_vals(init_params, prior_params, pymc_model, priors):
 
     if init_vals_format == 'prior':
         pymc_init_vals = {}
-        # TODO: Only construct sampler once
+        # TODO: Only construct sampler once when function is called multiple times
         seed = getattr(init_params, 'seed', None)
         prior_sampler = ml.parameters.ParameterSetSampler(prior_params, seed)
         init_vals = prior_sampler.sample(priors.keys())
@@ -577,7 +592,7 @@ def get_init_vals(init_params, prior_params, pymc_model, priors):
                     mask = prior.mask
                 pymc_init_vals[pymc_var] = val[mask]
 
-    elif init_vals_format == 'cartesian':
+    elif init_vals_format in ['fixed', 'cartesian']:
         raise NotImplementedError
         _init_vals_dict = { sgd.get_param(pname): init_params[pname]
                             for pname in init_params.variables }
