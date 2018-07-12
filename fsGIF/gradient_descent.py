@@ -725,8 +725,9 @@ if __name__ == "__main__":
                               'Default is to continue from an existing fit.')
     mgr.load_parameters()
 
-    shim.load_theano()
+    shim.config.floatX = mgr.params.sgd.floatX
     sinn.config.set_floatX()  # FIXME: Workaround because it sets sinn.config.rel_tolerance
+    shim.load_theano()
     shim.gettheano().config.compute_test_value = 'raise'
 
     # Check if we can continue a previous run
