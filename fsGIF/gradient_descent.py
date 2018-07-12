@@ -550,7 +550,8 @@ def get_previous_run(params, resume=True):
             # Don't resume: just reload the previous run
             prev_run = None
 
-def get_init_vals(init_params, prior_params, pymc_model, priors):
+def get_init_vals(params, pymc_model, priors):
+    init_params = params.init_vals
     init_vals_format = getattr(init_params, 'format', 'fixed')
     init_vals_random = getattr(init_params, 'random', False)
     # if init_vals_random:
@@ -558,16 +559,24 @@ def get_init_vals(init_params, prior_params, pymc_model, priors):
     #         np.random.seed(init_params.seed)
     #     logger.debug("RNG state: {}".format(np.random.get_state()[1][0]))
 
-    if init_vals_format == 'prior':
-        pymc_init_vals = {}
+    init_vals = {}
+
+    if init_vals_format in ('prior', 'dist'):
         # TODO: Only construct sampler once when function is called multiple times
         seed = getattr(init_params, 'seed', None)
-        prior_sampler = ml.parameters.ParameterSetSampler(prior_params, seed)
-        init_vals = prior_sampler.sample(priors.keys())
+        if init_vals_format == 'prior':
+            dist_params = params.posterior.model.prior
+        else:
+            assert(init_vals_format == 'dist')
+            dist_params = init_params.dist
+        sampler = ml.parameters.ParameterSetSampler(dist_params, seed)
+        sampled_init_vals = sampler.sample(priors.keys())
         # Cast to floatX
-        init_vals = {key: shim.cast_floatX(val)
-                     for key, val in init_vals.items()}
-        for name, val in init_vals.items():
+        sampled_init_vals = {key: shim.cast_floatX(val)
+                     for key, val in sampled_init_vals.items()}
+        # Attach the sampled variables to their corresponding variables –
+        # these are the variables created for the prior.
+        for name, val in sampled_init_vals.items():
             prior = priors[name]
             # Get the transformed variable, which is the one used in the cost graph.
             # If there is no transform these are no-ops
@@ -590,7 +599,7 @@ def get_init_vals(init_params, prior_params, pymc_model, priors):
                         # Basically just serves to flatten `val`
                 else:
                     mask = prior.mask
-                pymc_init_vals[pymc_var] = val[mask]
+                init_vals[pymc_var] = val[mask]
 
     elif init_vals_format in ['fixed', 'cartesian']:
         raise NotImplementedError
@@ -676,7 +685,7 @@ def get_init_vals(init_params, prior_params, pymc_model, priors):
                             for name, val in zip(curvals.keys(),
                                                  _init_vals_values) }
 
-    return pymc_init_vals
+    return init_vals
 
 
 def get_sgd_pathname(params, iterations=None, **kwargs):
@@ -744,8 +753,7 @@ if __name__ == "__main__":
     else:
         # Do the fit
         skipped = False
-        init_vals = get_init_vals(mgr.params.init_vals,
-                                  mgr.params.posterior.model.prior,
+        init_vals = get_init_vals(mgr.params,
                                   pymc_model,
                                   pymc_priors)
         sgd.initialize_vars(init_vals)
