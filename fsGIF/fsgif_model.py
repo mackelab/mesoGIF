@@ -1626,7 +1626,7 @@ class GIF_mean_field(models.Model):
         for h in dellist:
             del sinn.inputs[h]
 
-    def loglikelihood(self, start, batch_size, data=None,
+    def loglikelihood(self, start, batch_size, data=None, avg=True,
                       flags=()):
         """
         Returns
@@ -1639,6 +1639,9 @@ class GIF_mean_field(models.Model):
             for each variable all the time slices between `start` and `start+batch_size`.
         symbolic update dictionary: dict
             Update dictionary returned by the internal call to `scan()`.
+        avg: bool
+            True (default): Return the average log likelihood per time point in the batch.
+            False: Return the loglikelihood of the batch.
         flags: iterable of str
             Flags change the output format. Except when debugging, this should
             be left to its default value, as other functions may expect its
@@ -1649,7 +1652,8 @@ class GIF_mean_field(models.Model):
               values, or omit it from the input.
             - 'updates' (default) | 'no_updates': Include the update dictionary
               returned by `scan()`.
-
+            NOTE: At present flags only affect the output when not computing
+            with Theano.
 
         TODO: I'm not sure the state variable updates are useful; if really needed,
               that information should be in the update dictionary.
@@ -1755,7 +1759,9 @@ class GIF_mean_field(models.Model):
                 # Normalize the loglikelihood so that it is consistent when
                 # we change batch size
                 # outputs[0] = outputs[0] / shim.getT().arange(1, 1+batch_size)
-                logL = outputs[0][-1] / batch_size
+                logL = outputs[0][-1]
+                if avg:
+                    logL = logL / batch_size
 
                 self.apply_updates(upds)
                     # Applying updates is essential to remove the iteration variable
@@ -1763,7 +1769,7 @@ class GIF_mean_field(models.Model):
 
             logger.info("Likelihood graph complete")
 
-            return outputs[0][-1], outputs[1:], upds
+            return logL, outputs[1:], upds
                 # logL = outputs[0]; outputs[1:] => statevars
         else:
             # TODO: Remove this branch once shim.scan is implemented
@@ -1772,7 +1778,9 @@ class GIF_mean_field(models.Model):
             for t in np.arange(startidx+1, stopidx):
                 logL[t-startidx] = logLstep(t, logL[t-startidx-1])[0][0]
             upds = shim.get_updates()
-            logL /= np.arange(1,batch_size+1)
+
+            if avg:
+                logL /= np.arange(1,batch_size+1)
 
             retval = [logL] if 'all_logL' in outflags else [logL[-1]]
             if 'states' in outflags:
