@@ -47,7 +47,7 @@ import sinn.analyze as anlz
 from sinn.analyze.axisdata import LogLikelihood, Likelihood, Probability
 from sinn.analyze.axis import Axis
 
-import fsGIF.core
+import fsGIF.core as core
 import fsGIF.fsgif_model as fsgif_model
 from fsGIF.fsgif_model import GIF_mean_field, GIF_spiking
 from fsGIF.nblogger import logger
