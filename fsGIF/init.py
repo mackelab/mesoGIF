@@ -29,6 +29,8 @@ import pymc3 as pymc
 from pandas import DataFrame
 from parameters import ParameterSet
 
+from importlib import reload
+
 import theano_shim as shim
 
 import mackelab as ml
