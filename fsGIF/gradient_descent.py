@@ -28,6 +28,10 @@ data_dir = "data"
 label_dir = "run_dump"
 ############################
 
+# import mackelab.optimizers
+# mackelab.optimizers.debug_flags['nanguard'] = True
+# mackelab.optimizers.debug_flags['print grads'] = True
+
 # >>>FIXME<<<<<
 # Current implementation constructs the computational graph for the cost at least 4 times.
 
@@ -747,6 +751,7 @@ if __name__ == "__main__":
         sgd = get_sgd(mgr.params, model, pymc_model, start_var, batch_size_var)
 
     # Check if the fit has already been done
+    skipped = False
     if sgd.step_i >= mgr.params.sgd.max_iterations:
         # TODO Add convergence check (don't compile if converged, even if step_i < max_iterations
         skipped = True
@@ -754,7 +759,6 @@ if __name__ == "__main__":
         #return None, sgd.step_i
     else:
         # Do the fit
-        skipped = False
         init_vals = get_init_vals(mgr.params,
                                   pymc_model,
                                   pymc_priors)
