@@ -105,7 +105,105 @@ class FileRenamed(Exception):
 ###########################
 
 ###########################
+# Plotting functions
+###########################
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+# Manual formatting
+# (Constants for things I haven't managed to automate yet)
+
+flat_params =   [('w', (0,)),
+                 ('w', (1,)),
+                 ('w', (2,)),
+                 ('w', (3,)),
+                 ('u_r', (0,)),
+                 ('u_r', (1,)),
+                 ('τ_θ', (0,)),
+                 ('Δu', (0,)),
+                 ('Δu', (1,)),
+                 ('u_th', (0,)),
+                 ('u_th', (1,)),
+                 ('c', (0,)),
+                 ('c', (1,)),
+                 ('τ_m', (0,)),
+                 ('τ_m', (1,)),
+                 ('J_θ', (0,)),
+                 ('τ_s', (0,)),
+                 ('τ_s', (1,))]
+def τmformat(ax):
+    ax.set_yscale('log')
+def τθformat(ax):
+    ax.set_yscale('log')
+def τsformat(ax):
+    ax.set_yscale('log')
+plotformat = {('τ_m', (0,)): τmformat,
+          ('τ_m', (1,)): τmformat,
+          ('τ_θ', (0,)): τθformat,
+          ('τ_s', (0,)): τsformat,
+          ('τ_s', (1,)): τsformat}
+
+# Plotting functions
+
+def plot_fit(flat_params, fitcoll, ncols, colwidth, rowheight, title=None,
+             format=None, xscale='log', only_finite=True):
+    """
+    Parameters
+    ----------
+    xscale: str
+        'log' (default) | 'linear'
+    """
+
+    if format is None:
+        format = {}
+
+    nrows = np.ceil(len(flat_params) / ncols).astype(np.int)
+
+    fig = plt.figure(figsize=(ncols*colwidth, nrows*rowheight))
+
+    modelparams = ml.parameters.params_to_arrays(fitcoll.reffit.parameters.posterior.model.params)
+    masks = ml.parameters.params_to_arrays(fitcoll.reffit.parameters.posterior.mask)
+
+    for i, (varname, idx) in enumerate(flat_params):
+        ax = plt.subplot(nrows, ncols, i+1)
+        mask = masks[varname]
+        if mask is None:
+            mask = np.ones(modelparams[varname].shape, dtype=bool)
+        else:
+            mask = np.ones(modelparams[varname].shape, dtype=bool) * mask
+        mask = mask.reshape(modelparams[varname].shape)
+        targets = modelparams[varname][mask]
+        fitcoll.plot(varname, targets=targets, idx=idx, only_finite=only_finite)
+        idxstr = '{' + ','.join(str(c) for c in idx) + '}'
+        varstr = '${' + anlz.analyze.cleanname(varname) + '}_' + idxstr + '$'
+        ax.set_xscale(xscale)
+        if i < len(flat_params) - ncols:
+            # Only display x-axis on bottom row
+            pass
+#            plt.tick_params(
+#                axis='x',          # changes apply to the x-axis
+#                which='both',      # both major and minor ticks are affected
+#                bottom=False,      # ticks along the bottom edge are off
+#                top=False,         # ticks along the top edge are off
+#                labelbottom=False) # labels along the bottom edge are off
+        if 'default' in format:
+            format['default'](ax)
+        if (varname, idx) in format:
+            format[(varname, idx)](ax)
+
+        ml.plot.add_corner_ylabel(None, varstr, axcoordx=-0.07)
+
+    top = 1 if title is None else 0.92
+    fig.subplots_adjust(hspace=0.1, wspace=0.4, top=top)
+    if title is not None:
+        fig.suptitle(title,
+                     fontproperties=mpl.font_manager.FontProperties(
+                        weight='bold', size='x-large'))
+
+###########################
 # Run manager
+# NOTE: Tuned out to be more annoying than useful, and is being deprecated
 ###########################
 
 class RunMgr:
