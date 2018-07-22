@@ -1626,7 +1626,7 @@ class GIF_mean_field(models.Model):
         for h in dellist:
             del sinn.inputs[h]
 
-    def loglikelihood(self, start, batch_size, data=None, avg=True,
+    def loglikelihood(self, start, batch_size, data=None, avg=False,
                       flags=()):
         """
         Returns
@@ -1640,8 +1640,8 @@ class GIF_mean_field(models.Model):
         symbolic update dictionary: dict
             Update dictionary returned by the internal call to `scan()`.
         avg: bool
-            True (default): Return the average log likelihood per time point in the batch.
-            False: Return the loglikelihood of the batch.
+            True: Return the average log likelihood per time point in the batch.
+            False (default): Return the loglikelihood of the batch.
         flags: iterable of str
             Flags change the output format. Except when debugging, this should
             be left to its default value, as other functions may expect its

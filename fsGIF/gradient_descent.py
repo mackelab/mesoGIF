@@ -226,8 +226,9 @@ def get_pymc_model(params, model, batch_size):
         start.tag.test_value = 1
             # Must be large enough so that test_value slices are not empty
         batch_size_var.tag.test_value = 2
-        logL_model = model.loglikelihood(start, batch_size_var)[0]
-        logL = shim.graph.clone(logL_model, priors.subs)
+        logL_model = model.loglikelihood(start, batch_size_var, avg=False)[0]
+        logL = shim.graph.clone(logL_model, priors.subs) / batch_size_var
+            # Use average logL, so increasing batch size actually decreases variance
         def logL_fn(data):
             # Since logL depends on data before the minibatch, we can't just
             # compute the log-likelihood from `data`. Instead it depends on
