@@ -25,9 +25,8 @@ hist_types = { histname: histtype
 
 # Can add elements to hist_type here
 
-def generate_input(mgr):
+def generate_input(params):
 
-    params = mgr.params
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
@@ -84,6 +83,6 @@ if __name__ == "__main__":
         else:
             pathname = mgr.get_pathname(label=None)
         # Generate input
-        input_hist = generate_input(mgr)
+        input_hist = generate_input(mgr.params)
         # Save to file
         ml.iotools.save(pathname, input_hist)

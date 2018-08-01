@@ -15,6 +15,8 @@ logger = core.logger
 ############################
 # Model import
 from fsGIF import fsgif_model as gif
+data_dir = "data"
+label_dir = "run_dump"
 ############################
 
 sinn.config.set_floatX()
@@ -95,8 +97,23 @@ if __name__ == "__main__":
     core.init_logging_handlers()
     mgr = core.RunMgr(description="Generate spikes", calc='spikes')
     mgr.load_parameters()
-    spike_filename = core.add_extension(mgr.get_pathname(label=''))
-    spike_activity_filename = core.add_extension(mgr.get_pathname(label='', suffix='activity'))
+    params = mgr.params
+    spikename_params = params.copy()
+    # HACK because we changed spike.params format; reverts to old format if
+    # input is a parameterized history function
+    # if 'type' in spikename_params.input:
+    #     spikename_params.input = spikename_params.input.params
+    # END HACK
+    def get_filename(label, suffix):
+        spike_filename = core.add_extension(
+            core.get_pathname(data_dir  = data_dir,
+                              params    = spikename_params,
+                              subdir    = 'spikes',
+                              suffix    = suffix,
+                              label     = label)
+
+    spike_filename = get_filename(label='', suffix='')
+    spike_activity_filename = get_filename(label='', suffix='activity')
 
     # Check if we are simulating a heterogeneous population
     # Definitely HACK-y: the model should not need the `homo` flag in the first place
@@ -112,7 +129,7 @@ if __name__ == "__main__":
     generate_data = False
     try:
         # Try to load data to see if it's already been calculated
-        shist = mgr.load(spike_filename, cls=Spiketrain.from_raw)
+        shist = ml.iotools.load(spike_filename)
     except core.FileNotFound:
         generate_data = True
     except core.FileRenamed:
@@ -135,9 +152,11 @@ if __name__ == "__main__":
             spike_activity_filename = "shist_activity_debug.npr"
             spike_a_filename = "shist_E_activity_debug.npr"
         else:
-            spike_filename = core.add_extension(mgr.get_pathname(label=None))
-            spike_activity_filename = core.add_extension(mgr.get_pathname(suffix='activity', label=None))
-            spike_a_filename = core.add_extension(mgr.get_pathname(suffix='expected_activity', label=None))
+            spike_filename = get_filename(suffix='', label=None)
+            spike_activity_filename = get_filename(suffix='activity',
+                                                   label=None))
+            spike_a_filename = get_filename(suffix='expected_activity',
+                                            label=None)
 
         # Generate spikes
         model = generate_spikes(mgr)

@@ -11,24 +11,23 @@ logger = core.logger
 ############################
 # Model import
 from fsGIF import fsgif_model as gif
+data_dir = "data"
+label_dir = "run_dump"
 ############################
 
-def generate_activity(mgr):
+def get_model(params):
 
-    params = mgr.params
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
     logger.info("Generating new activity data...")
-    # Ihist = core.subsample(
-    #     Series.from_raw(iotools.loadraw(
-    #         mgr.get_pathname(params=params.input,
-    #                          subdir=mgr.subdirs['input']))),
-    #     params.dt)
     input_filename = core.add_extension(
-        mgr.get_pathname(params.input,
-                         subdir=mgr.subdirs['input'],
-                         label=''))
+        core.get_pathname(data_dir=data_dir,
+                          params=params.input.params,
+                          subdir=params.input.dir,
+                          suffix=params.input.name,
+                          label_dir=label_dir,
+                          label=''))
     Ihist = iotools.load(input_filename)
     if isinstance(Ihist, np.lib.npyio.NpzFile):
         # Support older data files
@@ -52,14 +51,6 @@ def generate_activity(mgr):
     # GIF activity model
     mfmodel = gif.GIF_mean_field(model_params, Ahist, Ihist_subsampled,
                                  params.initializer, rndstream)
-
-    # Generate the activity trace
-    # We could just call mfmodel.advance('end'), but doing it sequentially allows the progress bar
-    # And since we know that variables have to be computed iteratively anyway, there's not much
-    # cost to doing this.
-    for i in tqdm(range(mfmodel.t0idx, mfmodel.tnidx),
-                  position=mgr.args.threadidx):
-        mfmodel.advance(i)
 
     return mfmodel
 
@@ -87,10 +78,18 @@ if __name__ == "__main__":
             activity_filename = core.add_extension(mgr.get_pathname(label=None))
             #expected_activity_filename = core.add_extension(mgr.get_pathname(label=None, suffix='nbar'))
         # Create mean-field model and generate activity
-        mfmodel = generate_activity(mgr)
+        mfmodel = get_model(mgr.params)
+
+        # Generate the activity trace
+        # We could just call mfmodel.advance('end'), but doing it sequentially allows the progress bar
+        # And since we know that variables have to be computed iteratively anyway, there's not much
+        # cost to doing this.
+        for i in tqdm(range(mfmodel.t0idx, mfmodel.tnidx),
+                      position=mgr.args.threadidx):
+            mfmodel.advance(i)
+
         # Save to file
         iotools.save(activity_filename, mfmodel.A, format='npr')
         iotools.save(add_suffix(activity_filename, 'nbar'), mfmodel.nbar, format='npr')
         iotools.save(add_suffix(activity_filename, 'u'), mfmodel.u, format='npr')
         iotools.save(add_suffix(activity_filename, 'vartheta'), mfmodel.varθ, format='npr')
-

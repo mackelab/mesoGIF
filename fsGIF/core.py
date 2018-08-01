@@ -460,12 +460,8 @@ class RunMgr:
         """Wrapper for the internal ArgParse parser instance."""
         self.parser(*args, **kwargs)
 
-    def load_parameters(self, args=None, param_file=None):
+    def parse_args(self, args=None, param_file=None):
         """
-        Load a parameter file.
-        `np.array` is called on every non-string iterable parameter,
-        so that nested lists and tuples become Nd arrays.
-
         Parameters
         ----------
         args: list of strings
@@ -502,6 +498,23 @@ class RunMgr:
             self.recalculate = args.recalculate
         else:
             self.recalculate = False
+
+        return args
+
+    def load_parameters(self, args=None, param_file=None):
+        """
+        Load a parameter file.
+        `np.array` is called on every non-string iterable parameter,
+        so that nested lists and tuples become Nd arrays.
+
+        Parameters
+        ----------
+        args: list of strings
+            Provide the command line parameters, overriding them if they are present.
+        param_file: string
+            Path to parameter file. Overrides the path obtained from arguments.
+        """
+        args = self.parse_args(args, param_file)
 
         self.params = self._params_to_arrays(ParameterSet(args.parameters))
         if 'theano' in self.params and self.params.theano:
