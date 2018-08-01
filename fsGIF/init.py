@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image
 from matplotlib.gridspec import GridSpec
 import pymc3 as pymc
+import pandas as pd
 from pandas import DataFrame
 from parameters import ParameterSet
 
@@ -56,9 +57,10 @@ from fsGIF.nblogger import logger
 
 HOME = "/home/alex/Recherche/macke_lab"
 DATADIR = "/home/alex/Recherche/data/mackelab/sim/fsGIF/"
+DUMPDIR = os.path.join(DATADIR, "run_dump")
 
 recordstore = smttk.RecordStore(os.path.join(HOME, "run/fsGIF/.smt/records"))
-records = smttk.get_records(recordstore, 'fsGIF')
+#records = smttk.get_records(recordstore, 'fsGIF')
 """
 
 exec(init_code)
