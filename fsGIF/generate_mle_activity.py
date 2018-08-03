@@ -103,7 +103,7 @@ if __name__ == "__main__":
                                                   subdir   = 'activity',
                                                   suffix   = '',
                                                   label_dir = label_dir,
-                                                  label    = None)
+                                                  label    = mgr.label)
 
         mfmodel = get_model(params)
 
