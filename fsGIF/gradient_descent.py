@@ -91,6 +91,8 @@ def load_latest(pathname):
     return ml.iotools.load(latest), latest
 
 def get_model(params):
+    # TODO: Use core.get_meso_model
+
     global data_dir, label_dir
 
     params = ml.parameters.params_to_arrays(params)
@@ -103,15 +105,15 @@ def get_model(params):
     #     post_params.data.params.input = post_params.data.params.input.params
     # END HACK
 
-    if 'init_vals' not in params or params.init_vals is None:
-        init_vals = None
-    else:
-        # TODO: check if init_vals is a list
-        init_vals = params.init_vals
+    # if 'init_vals' not in params or params.init_vals is None:
+    #     init_vals = None
+    # else:
+    #     # TODO: check if init_vals is a list
+    #     init_vals = params.init_vals
 
     #output_filename = core.get_pathname(core.likelihood_subdir, params)
     #data_filename = core.get_pathname(params.data.dir, params.data.params, params.data.name)
-    sgd_filename = get_sgd_pathname(params, label='')
+    # sgd_filename = get_sgd_pathname(params, label='')
     data_filename = core.get_pathname(data_dir=data_dir,
                                       params=post_params.data.params,
                                       subdir=post_params.data.dir,
