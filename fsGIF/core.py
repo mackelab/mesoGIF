@@ -23,6 +23,7 @@ import mackelab as ml
 import mackelab.iotools
 import mackelab.parameters
 import mackelab.tqdm
+import mackelab.utils
 import theano_shim as shim
 import sinn
 import sinn.histories as histories
@@ -31,10 +32,15 @@ import sinn.analyze as anlz
 from sinn.analyze.heatmap import HeatMap
 
 from parameters import ParameterSet
-from fsGIF.fsgif_model import GIF_spiking
 
-import mackelab as ml
-import mackelab.utils
+############################
+# Model import
+import fsGIF.fsgif_model as gif
+from fsGIF.fsgif_model import GIF_spiking
+data_dir = "data"
+label_dir = "run_dump"
+############################
+
 
 # try:
 #     import matplotlib.pyplot as plt
@@ -940,6 +946,95 @@ def get_sampler(dists):
 
     return sampler
 
+def get_meso_model(data_params, input_params=None,
+                   model_params=None):
+    """
+    Parameters
+    ----------
+    data_params: ParameterSet
+        Same format as posterior.data
+    input_params: ParameterSet
+        Same format as posterior.input
+        If None, set to data_params.params.input.
+    model_params: ParameterSet
+        Same format as posterior.model.
+        Only 'dt', 'params' and 'initializer' attributes are used ?
+        If None, set to …
+    """
+    global data_dir, label_dir
+
+    if input_params is None:
+        input_params = data_params.params.input
+    if model_params is None:
+        model_params = ParameterSet({
+            'type': "GIF_mean_field",
+            'params': data_params.params.model,
+            'initializer': 'silent',
+            'dt': data_params.params.dt,
+            'prior': None
+        })
+
+    data_params = ml.parameters.params_to_arrays(ParameterSet(data_params))
+    input_params = ml.parameters.params_to_arrays(ParameterSet(input_params))
+
+    data_filename = get_pathname(data_dir=data_dir,
+                                 params=data_params.params,
+                                 subdir=data_params.dir,
+                                 suffix=data_params.name,
+                                 label_dir=label_dir,
+                                 label=''
+                                 )
+    input_filename = get_pathname(data_dir=data_dir,
+                                  params=input_params.params,
+                                  subdir=input_params.dir,
+                                  suffix=input_params.name,
+                                  label_dir=label_dir,
+                                  label=''
+                                  )
+    data_filename = add_extension(data_filename)
+    input_filename = add_extension(input_filename)
+
+    # Load the input data
+    input_history = ml.iotools.load(input_filename)
+    if isinstance(input_history, np.lib.npyio.NpzFile):
+        # Support older data files
+        input_history = histories.Series.from_raw(input_history)
+    input_history = subsample(input_history, model_params.dt)
+    input_history.lock()
+
+    if os.path.lexists(data_filename):
+        # Load the activity data
+        data_history = ml.iotools.load(data_filename)
+        if isinstance(data_history, np.lib.npyio.NpzFile):
+            # Support older data files
+            data_history = histories.Series.from_raw(data_history)
+        data_history = subsample(data_history, model_params.dt)
+        data_history.lock()
+        rndstream = None
+
+    else:
+        # The data does not exist: create a new activity series
+        # We check if different run parameters were specified,
+        # otherwise those from Ihist will be taken
+        Aparams = data_params.params
+        runparams = { name: params[name] for name in data_params
+                      if name in ['t0', 'tn', 'dt'] }
+
+        data_history = histories.Series(input_history, name='A',
+                              shape=(len(data_params.params.model.N),),
+                              iterative=True,
+                              **runparams)
+
+        rndstream = get_random_stream(data_params.params.seed)
+
+    fsgif_model_params = get_model_params(model_params.params, 'GIF_mean_field')
+        # Needed for now because fsgif_model does not yet use ParameterSet
+    model = gif.GIF_mean_field(fsgif_model_params,
+                               data_history, input_history,
+                               initializer=model_params.initializer,
+                               random_stream = rndstream)
+
+    return model
 
 def get_model_params(params, model_type):
     """Convert a ParameterSet to the internal parameter type used by models.
