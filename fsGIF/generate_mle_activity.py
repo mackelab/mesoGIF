@@ -42,7 +42,89 @@ def load_fitcollection(paramsets):
 
     return fitcoll
 
+def update_params(baseparams, *newparams):
+    """
+    Construct a parameter set based on `baseparams`, replacing with the
+    values in `newparams`. Multiple `newparams` can be given; the latest
+    (rightmost) ones have precedence.
+
+    `baseparams` is updated in place; make a copy first if you need to keep
+    the original.
+
+    ..Note: Currently only works with non-nested parameter sets.
+
+    Parameters
+    ----------
+    baseparams:  ParameterSet
+        Must contain an entry corresponding to each entry in the newparams.
+
+    *newparams: dictionaries
+    """
+    baseparams = ml.parameters.params_to_arrays(baseparams)
+    for paramset in newparams:
+        paramset = ml.parameters.params_to_arrays(paramset)
+        for key, val in paramset.items():
+            paramset[key] = val.reshape(baseparams[key].shape)
+        baseparams.update(paramset)
+    return baseparams
+
+def create_activity_paramset(paramset, base_paramset, export=None):
+    """
+    Construct parameter set in same format as for generating activities
+    If export is provided, writes the result to that file, overwriting
+    the content.
+
+    A copy of `base_paramset` is made, so the original is preserved.
+
+    Parameters
+    ----------
+    paramset: ParameterSet
+        As given by FitCollection.result
+
+    base_parameset: ParameterSet
+        As required by `generate_activity.py`
+
+    """
+    # `base_paramset` can be either a string or a ParameterSet
+    # If the latter, make a copy.
+    if isinstance(base_paramset, str):
+        base_paramset = ParameterSet(base_paramset)
+    elif isinstance(base_paramset, ParameterSet):
+        params = base_paramset.copy()
+    else:
+        raise ValueError("`base_paramset` must be either a string or a "
+                         "parameter set.")
+    # Check that `base_paramset` has the right format
+    assert(all(key in base_paramset for key in ('input', 'model', 'seed', 'initializer', 'theano')))
+
+    # `paramset` can be either a string or a ParameterSet
+    if isinstance(paramset, str):
+        paramset = ParameterSet(paramset)
+    elif not isinstance(paramset, dict):
+        raise ValueError("`paramset` must be either a string or a "
+                         "parameter set.")
+
+    # Create the updated parameter set.
+    params.model = update_params(params.model, paramset)
+
+    # Export to file if required
+    if export is not None:
+        export_params = ml.parameters.params_to_lists(params)
+        export_params.save(export)
+
+    return params
+
+
 if __name__ == "__main__":
+
+    raise NotImplementedError(
+        "This script is currently unsupported because it uses parameter "
+        "definitions that can't be parsed by ParameterSet, and I'm unwilling "
+        "to write my own parser for this. (See `param_type` for some comments "
+        "on the work this would require)\n"
+        "Instead just write the MLE params to a file, and use "
+        "`generate_activity.py` to generate a simulation from that.")
+
     core.init_logging_handlers()
     mgr = core.RunMgr(description="Generate activity with inferred parameters",
                       calc='activity')
@@ -74,15 +156,12 @@ if __name__ == "__main__":
                              "expansion only works for the gradient descent "
                              "parameters. Here the parameters differ on keys "
                              "{}.".format(diffkeys))
+    del params['fits']
 
     # Construct parameter set in same format as for generating activities
-    params = p0.copy()  # all p's guaranteed to be the same at this point
-    params.model = ml.parameters.params_to_arrays(params.model)
-    result = fitcoll.result
-    for key, val in result.items():
-        result[key] = val.reshape(params.model[key].shape)
-    params.model.update(result)
-    del params['fits']
+    #params = p0.copy()
+    #params.model = updated_params(params.model, fitcoll.result)
+    params = create_activity_paramset(p0, fitcoll.result)
 
     activity_filename = core.get_pathname(data_dir = data_dir,
                                           params   = params,
