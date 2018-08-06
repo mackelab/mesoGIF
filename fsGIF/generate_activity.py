@@ -16,11 +16,11 @@ label_dir = "run_dump"
 ############################
 
 def get_model(params):
+    # TODO: Use core.get_meso_model
 
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
-    logger.info("Generating new activity data...")
     input_filename = core.add_extension(
         core.get_pathname(data_dir=data_dir,
                           params=params.input.params,
@@ -84,6 +84,7 @@ if __name__ == "__main__":
         # We could just call mfmodel.advance('end'), but doing it sequentially allows the progress bar
         # And since we know that variables have to be computed iteratively anyway, there's not much
         # cost to doing this.
+        logger.info("Generating new activity data...")
         for i in tqdm(range(mfmodel.t0idx, mfmodel.tnidx),
                       position=mgr.args.threadidx):
             mfmodel.advance(i)
