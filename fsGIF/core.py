@@ -1002,14 +1002,35 @@ def get_meso_model(data_params, input_params=None,
     input_history = subsample(input_history, model_params.dt)
     input_history.lock()
 
+    suffixes = {'A': data_params.name,
+                'nbar': 'nbar',
+                'u': 'u',
+                'varθ': 'vartheta'}
     if os.path.lexists(data_filename):
         # Load the activity data
-        data_history = ml.iotools.load(data_filename)
-        if isinstance(data_history, np.lib.npyio.NpzFile):
-            # Support older data files
-            data_history = histories.Series.from_raw(data_history)
-        data_history = subsample(data_history, model_params.dt)
-        data_history.lock()
+        # Also load intermediate histories (nbar, u, vartheta) if they exist:
+        # this provides many-fold acceleration of calculations e.g. of the
+        # likelihood.
+        filename, ext = os.path.splitext(data_filename)
+        splits = filename.rsplit('_', maxsplit=1)
+        basepath, data_suffix = splits if len(splits) == 2 else (splits[0], '')
+        assert(data_suffix == data_params.name)
+        paths = { histname: '_'.join(filter(None, [basepath, suffix])) + ext
+                  for histname, suffix in suffixes.items() }
+        def load(path):
+            try: return ml.iotools.load(path)
+            except FileNotFoundError: return None
+        hists = { histname: load(path)
+                  for histname, path in paths.items() }
+        # data_history = ml.iotools.load(data_filename)
+        # if isinstance(data_history, np.lib.npyio.NpzFile):
+        #     # Support older data files
+        #     data_history = histories.Series.from_raw(data_history)
+        for histname, hist in hists.items():
+            if hist is not None:
+                hists[histname] = subsample(hist, model_params.dt)
+            hist.lock()
+        data_history = hists['A']
         rndstream = None
 
     else:
@@ -1024,7 +1045,8 @@ def get_meso_model(data_params, input_params=None,
                               shape=(len(data_params.params.model.N),),
                               iterative=True,
                               **runparams)
-
+        hists = {histname: None for histname in suffixes}
+        hists['A'] = data_history
         rndstream = get_random_stream(data_params.params.seed)
 
     fsgif_model_params = get_model_params(model_params.params, 'GIF_mean_field')
@@ -1033,6 +1055,31 @@ def get_meso_model(data_params, input_params=None,
                                data_history, input_history,
                                initializer=model_params.initializer,
                                random_stream = rndstream)
+    # Set the pre-computed histories if they are available
+    for histname, hist in hists.items():
+        modelhist = getattr(model, histname)
+        if hist is not None and hist.cur_tidx > modelhist.cur_tidx:
+            # TODO: Move to histories.Series.set(Series)
+            #       When doing so, allow for assigning to a subslice
+            #assert(np.all(modelhist._tarr == hist._tarr))
+            assert(modelhist.dt == hist.dt)
+            assert(modelhist.t0 == hist.t0)
+            assert(modelhist.shape == hist.shape)
+            if modelhist._tarr[0] <= hist._tarr[0]:
+                src_startidx = 0
+                target_startidx = hist.get_tidx_for(0, modelhist)
+            else:
+                src_startidx = modelhist.get_tidx_for(0, hist)
+                target_startidx = 0
+            if modelhist._tarr[-1] >= hist._tarr[hist.cur_tidx]:
+                src_stopidx = hist.cur_tidx
+                target_stopidx = hist.get_tidx_for(hist.cur_tidx, modelhist)
+            else:
+                target_stopidx = len(modelhist._tarr)
+                src_stopidx = modelhist.get_tidx_for(target_stopidx, hist)
+            assert(target_stopidx-target_startidx == src_stopidx-src_startidx)
+            modelhist[target_startidx:target_stopidx] = hist[src_startidx:src_stopidx]
+            #modelhist._data = hist._data.astype(modelhist._data.dtype)
 
     return model
 
@@ -1156,6 +1203,14 @@ def subsample(hist, target_dt, max_len = None):
                                   "symbolic histories.")
     amount = np.rint(target_dt / hist.dt).astype('int64')
     amount = amount.astype(np.min_scalar_type(amount))
+    if amount == 0:
+        raise ValueError("`subsample` can only decrease sampling rate. "
+                         "history dt: {}\ntarget dt: {}"
+                         .format(hist.dt, target_dt))
+    #elif amount == 1:
+    #    # Nothing to do
+    #    return hist
+
     newhist = anlz.subsample(hist, amount)
     if max_len is not None:
         Δidx = newhist.index_interval(max_len)
