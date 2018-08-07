@@ -1652,6 +1652,8 @@ class GIF_mean_field(models.Model):
               values, or omit it from the input.
             - 'updates' (default) | 'no_updates': Include the update dictionary
               returned by `scan()`.
+            - 'optimize' (default) | 'mirror theano': Allow Numpy optimizations
+              that break the mirroring of Numpy and Theano code.
             NOTE: At present flags only affect the output when not computing
             with Theano.
 
@@ -1660,9 +1662,13 @@ class GIF_mean_field(models.Model):
         """
         # Set the output flags
         # TODO: Use an enum
-        flag_values = [['last_logL', 'all_logL'],   # Each row corresponds to
-                       ['states', 'no_states'],     # a different option. First
-                       ['updates', 'no_updates']]   # element of row is default.
+        # Each row corresponds to an option. First element of row is default.
+        flag_values = [['last_logL', 'all_logL'],
+                       ['states', 'no_states'],
+                       ['updates', 'no_updates'],
+                       ['optimize', 'mirror theano']]
+        if isinstance(flags, str):
+            flags = (flags,)
         outflags = set()
         for option in flag_values:
             # Prepend with the default
@@ -1772,11 +1778,22 @@ class GIF_mean_field(models.Model):
             return logL, outputs[1:], upds
                 # logL = outputs[0]; outputs[1:] => statevars
         else:
-            # TODO: Remove this branch once shim.scan is implemented
-            logL = np.zeros(stopidx - startidx, dtype=shim.config.floatX)
-            logL[0] = logLstep(startidx, np.array(0, dtype=shim.config.floatX))[0][0]
-            for t in np.arange(startidx+1, stopidx):
-                logL[t-startidx] = logLstep(t, logL[t-startidx-1])[0][0]
+            if 'mirror theano' in outflags:
+                # TODO: Remove this branch once shim.scan is implemented
+                logL = np.zeros(stopidx - startidx, dtype=shim.config.floatX)
+                logL[0] = logLstep(startidx, np.array(0, dtype=shim.config.floatX))[0][0]
+                for t in np.arange(startidx+1, stopidx):
+                    logL[t-startidx] = logLstep(t, logL[t-startidx-1])[0][0]
+            else:
+                nbar = self.nbar[startidx:stopidx]
+                p = sinn.clip_probabilities(nbar / self.params.N)
+                n = n_full[startidx-self.t0idx+t0idx:stopidx-self.t0idx+t0idx]
+                logL = shim.cumsum( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
+                                    + n*shim.log(p)
+                                    + (N-n)*shim.log(1-p),
+                                    dtype=shim.config.floatX
+                                  ).astype(shim.config.floatX)
+
             upds = shim.get_updates()
 
             if avg:
