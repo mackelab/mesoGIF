@@ -110,6 +110,7 @@ class Kernel_θ2(models.ModelKernelMixin, kernels.ExpKernel):
 
 class GIF_spiking(models.Model):
 
+    requires_rng = True
     # Entries to Parameter_info: ( 'parameter name',
     #                              (dtype, default value, shape_flag) )
     # If the shape_flag is True, the parameter will be reshaped into a 2d
@@ -172,7 +173,9 @@ class GIF_spiking(models.Model):
         models.Model.same_dt(self.s, self.I_ext)
         models.Model.output_rng(self.s, self.rndstream)
 
-        super().__init__(params, reference_history=self.s)
+        super().__init__(params,
+                        public_histories=(spike_history, input_history),
+                        reference_history=self.s)
         # NOTE: Do not use `params` beyond here. Always use self.params.
         self.params = self.params._replace(
             **{name: self.s.PopTerm(getattr(self.params, name)) for name in params._fields})
@@ -612,6 +615,7 @@ class GIF_spiking(models.Model):
 
 
 class GIF_mean_field(models.Model):
+    requires_rng = True
     Parameter_info = GIF_spiking.Parameter_info.copy()
     del Parameter_info['Γ']   # Remove the connectivity matrix
     Parameters = sinn.define_parameters(Parameter_info)
@@ -655,7 +659,9 @@ class GIF_mean_field(models.Model):
         self.nbar = Series(self.A, 'nbar', symbolic=False)
 
         # Run the base class initialization
-        super().__init__(params, reference_history=self.nbar)
+        super().__init__(params,
+                        public_histories=(activity_history, input_history),
+                        reference_history=self.nbar)
         # NOTE: Do not use `params` beyond here. Always use self.params.
 
         N = self.params.N.get_value()
