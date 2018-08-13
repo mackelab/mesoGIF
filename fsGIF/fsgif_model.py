@@ -2452,7 +2452,7 @@ class GIF_mean_field(models.Model):
 
         # P_Λ
         P_Λ = shim.switch( Z + z0 > 0,
-                           ( Y + Pfreet*z0
+                           ( (Y + Pfreet*z0)
                              / (shim.abs(Z + z0) + sinn.config.abs_tolerance) ),
                            0 )
         P_Λ.name = 'P_Λ'
