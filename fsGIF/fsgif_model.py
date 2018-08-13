@@ -29,6 +29,10 @@ homo = True  # HACK
 shim.cf.inf = 1e12
     # Actual infinity doesn't play nice in kernels, because inf*0 is undefined
 
+# Debug flag(s)
+debugprint = False
+    # If true, all intermediate values are printed in the symbolic graph
+
 class Kernel_ε(models.ModelKernelMixin, kernels.ExpKernel):
     @staticmethod
     def get_kernel_params(model_params):
@@ -1719,13 +1723,17 @@ class GIF_mean_field(models.Model):
                 state_outputs, updates = self.symbolic_update(tidx, *args[2:])
                     # FIXME: make this args[1:] once n is in state variables
                 #nbar = output_vars[self.nbar]
+                # state_outputs = [shim.print(var) for var in state_outputs] # DEBUG
                 nbar = self.symbolic_nbar(args[2:], state_outputs)
             else:
                 nbar = self.nbar[tidx-self.t0idx+self.nbar.t0idx]
                 state_outputs = []
                 updates = shim.get_updates()
+            if debugprint: nbar = shim.print(nbar, "nbar (log L)")
             p = sinn.clip_probabilities(nbar / self.params.N)
             n = n_full[tidx-self.t0idx+t0idx]
+            if debugprint: p = shim.print(p, "p (log L)")
+            if debugprint: n = shim.print(n, "n (log L)")
 
             assert(args[0].dtype == shim.config.floatX)
             cum_logL = args[0] + ( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
@@ -2176,6 +2184,7 @@ class GIF_mean_field(models.Model):
 
         # convert model time to difference from t0
         tidx = tidx - self.t0idx
+        if debugprint: tidx = shim.print(tidx, 'tidx')
 
         # shared constants
         tidx_n = tidx + self.n.t0idx
@@ -2183,6 +2192,7 @@ class GIF_mean_field(models.Model):
         # yt
         red_factor = shim.exp(-self.y.dt/self.params.τ_s)
         yt = self.A_Δ[tidx+self.A_Δ.t0idx] + (y0 - self.A_Δ[tidx+self.A_Δ.t0idx]) * red_factor
+        if debugprint: yt = shim.print(yt)
 
         # htot
         τ_mα = self.params.τ_m.flatten()[:,np.newaxis]
@@ -2201,14 +2211,14 @@ class GIF_mean_field(models.Model):
                               / (self.params.τ_s - τ_mα) ) )
                    ).sum(axis=-1, dtype=shim.config.floatX) )
         h_tot.name = 'h_tot'
-        # h_tot = shim.print(h_tot)
+        if debugprint: h_tot = shim.print(h_tot)
 
 
         # ht
         red_factor = shim.exp(-self.h.dt/self.params.τ_m.flatten() )
         ht = ( (h0 - self.params.u_rest) * red_factor + h_tot )
         ht.name = 'ht'
-        # ht = shim.print(ht)
+        if debugprint: ht = shim.print(ht)
 
         # ut
         red_factor = shim.exp(-self.u.dt/self.params.τ_m).flatten()[np.newaxis, ...]
@@ -2217,7 +2227,7 @@ class GIF_mean_field(models.Model):
               ((u0[:-1] - self.params.u_rest[np.newaxis, ...]) * red_factor + h_tot[np.newaxis,...]) ),
             axis=-2)
         ut.name = 'ut'
-        # ut = shim.print(ut)
+        if debugprint: ut = shim.print(ut)
 
         # gt
         red_factor = shim.exp(- self.g.dt/self.params.τ_θ)
@@ -2226,13 +2236,13 @@ class GIF_mean_field(models.Model):
                    / (self.params.N * self.g.dt)
                 ).flatten()
         gt.name = 'gt'
-        # gt = shim.print(gt)
+        if debugprint: gt = shim.print(gt)
 
         # varθfree
         red_factor = (self.params.J_θ * shim.exp(-self.memory_time/self.params.τ_θ)).flatten()
         varθfree =  self.params.u_th + red_factor * gt
         varθfree.name = 'varθfree'
-        # varθfree = shim.print(varθfree)
+        if debugprint: varθfree = shim.print(varθfree)
 
         # varθ
         # K = self.u.shape[0]
@@ -2242,22 +2252,22 @@ class GIF_mean_field(models.Model):
                               - self.n._data[tidx_n-K:tidx_n] * self.θtilde_dis._data[:K][...,::-1,:])[...,::-1,:]
         varθ = self.θ_dis._data[:K] + varθfree + varθref
         varθ.name = 'varθ'
-        # varθ = shim.print(varθ)
+        if debugprint: varθ = shim.print(varθ)
 
         # λt
         λt = self.f(ut - varθ) * self.ref_mask
         λt.name = 'λt'
-        # λt = shim.print(λt)
+        if debugprint: λt = shim.print(λt)
 
         # λfree
         λfreet = self.f(ht - varθfree[0])
         λfreet.name = 'λfreet'
-        # λfreet = shim.print(λfreet)
+        if debugprint: λfreet = shim.print(λfreet)
 
         # Pfreet
         Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet) * self.λfree.dt )
         Pfreet.name = 'Pfreet'
-        # Pfreet = shim.print(Pfreet)
+        if debugprint: Pfreet = shim.print(Pfreet)
 
         # P_λt
         λprev = shim.concatenate(
@@ -2268,19 +2278,19 @@ class GIF_mean_field(models.Model):
                            P_λ_tmp,
                            1 - shim.exp(-P_λ_tmp))
         P_λt.name = 'P_λt'
-        # P_λt = shim.print(P_λt)
+        if debugprint: P_λt = shim.print(P_λt)
 
         # mt
         mt = shim.concatenate(
             ( self.n._data[tidx_n-1][np.newaxis,:], ((1 - P_λt[1:]) * m0[:-1]) ),
             axis=-2 )
         mt.name = 'mt'
-        # mt = shim.print(mt)
+        if debugprint: mt = shim.print(mt)
 
         # xt
         xt = ( (1 - Pfreet) * x0 + mt[-1] )
         xt.name = 'xt'
-        # xt = shim.print(xt)
+        if debugprint: xt = shim.print(xt)
 
         # vt
         vt = shim.concatenate(
@@ -2288,12 +2298,12 @@ class GIF_mean_field(models.Model):
               (1 - P_λt[1:])**2 * v0[:-1] + P_λt[1:] * m0[:-1] ),
             axis=-2)
         vt.name = 'vt'
-        # vt = shim.print(vt)
+        if debugprint: vt = shim.print(vt)
 
         # zt
         zt = ( (1 - Pfreet)**2 * z0  +  Pfreet*x0  + vt[0] )
         zt.name = 'zt'
-        # zt = shim.print(zt)
+        if debugprint: zt = shim.print(zt)
 
         newstate = self.LatentState(
             h = ht,
@@ -2376,6 +2386,7 @@ class GIF_mean_field(models.Model):
         and new state. Both are in the same order as the 'outputs_info' given
         to `scan`.
         """
+
         curstate = self.LatentState(*curstate_list)
         newstate = self.LatentState(*newstate_list)
         λ0 = curstate.λ
@@ -2396,6 +2407,7 @@ class GIF_mean_field(models.Model):
         mt.name = 'mt'
         xt.name = 'xt'
 
+        # if debugprint: xt = shim.print(xt)
         # z0 = shim.print(z0)
 
 
@@ -2403,7 +2415,7 @@ class GIF_mean_field(models.Model):
         # TODO: Find way not to repeat this and P_λt from `symbolic_update()`
         Pfreet = 1 - shim.exp(-0.5 * (λfree0 + λfreet) * self.λfree.dt )
         Pfreet.name = 'Pfreet'
-        # Pfreet = shim.print(Pfreet)
+        if debugprint: Pfreet = shim.print(Pfreet)
 
         # P_λt
         λprev = shim.concatenate(
@@ -2414,26 +2426,29 @@ class GIF_mean_field(models.Model):
         P_λt = shim.switch(P_λ_tmp <= 0.01,
                            P_λ_tmp,
                            1 - shim.exp(-P_λ_tmp))
-        P_λt.name = 'P_λt'
+        P_λt.name = 'P_λt (symb nbar)'
+        if debugprint: P_λt = shim.print(P_λt)
 
         # W
         Wref_mask = self.ref_mask[:self.m.shape[0],:]
         W = (P_λt * mt * Wref_mask).sum(axis=-2)
         W.name = 'W'
+        if debugprint: W = shim.print(W)
 
         # X
         X = mt.sum(axis=-2)
         X.name = 'X'
+        if debugprint: X = shim.print(X)
 
         # Y
         Y = (P_λt * v0).sum(axis=-2)
         Y.name = 'Y'
-        # Y = shim.print(Y)
+        if debugprint: Y = shim.print(Y)
 
         # Z
         Z = v0.sum(axis=-2)
         Z.name = 'Z'
-        # Z = shim.print(Z)
+        if debugprint: Z = shim.print(Z)
 
         # P_Λ
         P_Λ = shim.switch( Z + z0 > 0,
@@ -2441,9 +2456,13 @@ class GIF_mean_field(models.Model):
                              / (shim.abs(Z + z0) + sinn.config.abs_tolerance) ),
                            0 )
         P_Λ.name = 'P_Λ'
+        if debugprint: P_Λ = shim.print(P_Λ)
 
         # nbar
-        nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
+        # nbar = ( W + Pfreet * xt + P_Λ * (self.params.N - X - xt) )
+        c = self.params.N - X - xt
+        if debugprint: c = shim.print(c, "N - X - x")
+        nbar = ( W + Pfreet * xt + P_Λ * c )
 
         return nbar
 

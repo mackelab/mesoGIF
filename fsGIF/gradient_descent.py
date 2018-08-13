@@ -28,6 +28,10 @@ data_dir = "data"
 label_dir = "run_dump"
 ############################
 
+debugprint = False
+gif.debugprint = debugprint
+
+
 # import mackelab.optimizers
 # mackelab.optimizers.debug_flags['nanguard'] = True
 # mackelab.optimizers.debug_flags['print grads'] = True
@@ -276,10 +280,21 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
     track_vars = OrderedDict(
         (name, prior.transform.back(pymc_model.named_vars[prior.transform.names.new]))
          for name, prior in pymc_priors.items() )
-    start = model.t0idx + model.index_interval(params.posterior.burnin)
-    datalen = model.index_interval(params.posterior.datalen)
-    burnin = model.index_interval(params.sgd.batch_burnin)
-    batch_size = model.index_interval(params.sgd.batch_size)
+    if not debugprint:
+        start = model.t0idx + model.index_interval(params.posterior.burnin)
+        datalen = model.index_interval(params.posterior.datalen)
+        burnin = model.index_interval(params.sgd.batch_burnin)
+        batch_size = model.index_interval(params.sgd.batch_size)
+    else:
+        # Replace the cost by a cost over a single step and a set starting
+        # point. By fixing the start and length of the batch, it allows to
+        # compare with a cost computed externally.
+        # The batch start point is set to the value of `debugprint` and can
+        # be changed with `self.sstart.set_value(np.int32())`.
+        start = shim.shared(np.int32(0))  # Attached to SGD below
+        datalen = np.int32(1)
+        burnin = np.int32(0)
+        batch_size = np.int32(1)
 
     if getattr(params.sgd, 'mode', None) == 'sequential':
         def model_initialize(t):
@@ -344,6 +359,9 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
     )
     model.clear_unlocked_histories()
     model.theano_reset() # TODO: deprecated ?
+
+    if debugprint:
+        sgd.dbgstart = start  # Handle to help debugging
 
     return sgd
 
