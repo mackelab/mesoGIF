@@ -44,8 +44,11 @@ def generate_spikes(mgr):
     #                  #cls=Series.from_raw,
     #                  recalculate=False)
     input_filename = core.add_extension(
-        mgr.get_pathname(params.input,
-                         subdir=mgr.subdirs['input'],
+        core.get_pathname(data_dir = core.data_dir,
+                         params=params.input.params,
+                         subdir=params.input.dir,
+                         suffix=params.input.name,
+                         label_dir=core.label_dir,
                          label=''))
     Ihist = iotools.load(input_filename)
     if isinstance(Ihist, np.lib.npyio.NpzFile):
@@ -107,6 +110,7 @@ if __name__ == "__main__":
     def get_filename(label, suffix):
         return core.add_extension(
             core.get_pathname(data_dir  = data_dir,
+                              label_dir = core.label_dir,
                               params    = spikename_params,
                               subdir    = 'spikes',
                               suffix    = suffix,
