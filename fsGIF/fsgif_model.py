@@ -899,7 +899,11 @@ class GIF_mean_field(models.Model):
         WARNING: We've hidden the dependency on params.N here.
         """
 
-        assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1)
+        assert(self.A.locked)
+        #assert(self.A._original_tidx.get_value() >= self.A.t0idx + len(self.A) - 1)
+        if self.A.cur_tidx < self.A.t0idx + len(self.A):
+            logger.warning("Activity was only computed up to {}."
+                           .format(self.A.tn))
         self.n.clear_inputs()
         # TODO: use op
         #self.n.set_update_function(lambda t: self.A[t] * self.params.N * self.A.dt)
@@ -924,7 +928,9 @@ class GIF_mean_field(models.Model):
             # from inputs (which where would be self.A)
             # Or it could just return the state of `locked` ?
         self.A_Δ._iterative = False
-        self.A_Δ.set()
+        # Can't use `set()` because self.A may be unfilled
+        tidx = self.A.get_tidx_for(self.A.cur_tidx, self.A_Δ)
+        self.A_Δ.compute_up_to(tidx)
         # self.A_Δ._original_data.set_value(self.A_Δ._data.eval())
         # self.A_Δ._data = self.A_Δ._original_data
         # self.A_Δ._original_tidx.set_value(self.A_Δ._cur_tidx.eval())
@@ -1689,8 +1695,9 @@ class GIF_mean_field(models.Model):
         # End hacks
         #####################
 
+        batch_size = self.index_interval(batch_size)
         startidx = self.get_t_idx(start)
-        stopidx = startidx + self.index_interval(batch_size)
+        stopidx = startidx + batch_size
         N = self.params.N
         if data is None:
             n_full = self.n
@@ -1794,9 +1801,14 @@ class GIF_mean_field(models.Model):
                 nbar = self.nbar[startidx:stopidx]
                 p = sinn.clip_probabilities(nbar / self.params.N)
                 n = n_full[startidx-self.t0idx+t0idx:stopidx-self.t0idx+t0idx]
-                logL = shim.cumsum( -shim.gammaln(n+1) - shim.gammaln(N-n+1)
-                                    + n*shim.log(p)
-                                    + (N-n)*shim.log(1-p),
+                # To match the output of 'mirror theano', we first sum across
+                # populations to have one logL per time point, then cumsum
+                sumaxes = tuple(range(1, n.ndim)) # all axes except first
+                logL = shim.cumsum( (-shim.gammaln(n+1) - shim.gammaln(N-n+1)
+                                     + n*shim.log(p)
+                                     + (N-n)*shim.log(1-p)
+                                    ).sum(axis=sumaxes,
+                                          dtype=shim.config.floatX),
                                     dtype=shim.config.floatX
                                   ).astype(shim.config.floatX)
 
