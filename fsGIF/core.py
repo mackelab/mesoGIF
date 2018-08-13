@@ -153,26 +153,31 @@ plotformat = {('τ_m', (0,)): τmformat,
 # Plotting functions
 
 def plot_fit(flat_params, fitcoll, ncols, colwidth, rowheight, title=None,
-             format=None, xscale='log', only_finite=True):
+             format=None, xscale='log', only_finite=True, blank_cols=0,
+             **kwargs):
     """
     Parameters
     ----------
     xscale: str
         'log' (default) | 'linear'
+    […]
+    **kwargs:
+        Extra keyword arguments are forwarded to `FitCollection.plot()`.
     """
 
     if format is None:
         format = {}
 
-    nrows = np.ceil(len(flat_params) / ncols).astype(np.int)
+    nrows = np.ceil(len(flat_params) / (ncols+blank_cols)).astype(np.int)
 
-    fig = plt.figure(figsize=(ncols*colwidth, nrows*rowheight))
+    fig = plt.figure(figsize=((ncols+blank_cols)*colwidth, nrows*rowheight))
 
     modelparams = ml.parameters.params_to_arrays(fitcoll.reffit.parameters.posterior.model.params)
     masks = ml.parameters.params_to_arrays(fitcoll.reffit.parameters.posterior.mask)
 
     for i, (varname, idx) in enumerate(flat_params):
-        ax = plt.subplot(nrows, ncols, i+1)
+        axidx = i + (i // ncols) * blank_cols
+        ax = plt.subplot(nrows, ncols+blank_cols, i+1)
         mask = masks[varname]
         if mask is None:
             mask = np.ones(modelparams[varname].shape, dtype=bool)
@@ -180,7 +185,8 @@ def plot_fit(flat_params, fitcoll, ncols, colwidth, rowheight, title=None,
             mask = np.ones(modelparams[varname].shape, dtype=bool) * mask
         mask = mask.reshape(modelparams[varname].shape)
         targets = modelparams[varname][mask]
-        fitcoll.plot(varname, targets=targets, idx=idx, only_finite=only_finite)
+        fitcoll.plot(varname, targets=targets, idx=idx, only_finite=only_finite,
+                     **kwargs)
         idxstr = '{' + ','.join(str(c) for c in idx) + '}'
         varstr = '${' + anlz.analyze.cleanname(varname) + '}_' + idxstr + '$'
         ax.set_xscale(xscale)
@@ -200,7 +206,8 @@ def plot_fit(flat_params, fitcoll, ncols, colwidth, rowheight, title=None,
 
         ml.plot.add_corner_ylabel(None, varstr, axcoordx=-0.07)
 
-    top = 1 if title is None else 0.92
+    # We want 0.3in of space for the suptitle
+    top = 1 if title is None else 1 - 0.35/(nrows*rowheight)
     fig.subplots_adjust(hspace=0.1, wspace=0.4, top=top)
     if title is not None:
         fig.suptitle(title,
@@ -947,7 +954,7 @@ def get_sampler(dists):
     return sampler
 
 def get_meso_model(data_params, input_params=None,
-                   model_params=None):
+                   model_params=None, look_for_file=True):
     """
     Parameters
     ----------
@@ -960,6 +967,10 @@ def get_meso_model(data_params, input_params=None,
         Same format as posterior.model.
         Only 'dt', 'params' and 'initializer' attributes are used ?
         If None, set to …
+    look_for_file: bool
+        If true, will try to find simulated data from this mesoscopic model
+        with these parameters. If found, the model is populated with the
+        precomputed data.
     """
     global data_dir, label_dir
 
@@ -1006,7 +1017,8 @@ def get_meso_model(data_params, input_params=None,
                 'nbar': 'nbar',
                 'u': 'u',
                 'varθ': 'vartheta'}
-    if os.path.lexists(data_filename):
+
+    if look_for_file and os.path.lexists(data_filename):
         # Load the activity data
         # Also load intermediate histories (nbar, u, vartheta) if they exist:
         # this provides many-fold acceleration of calculations e.g. of the
@@ -1059,29 +1071,32 @@ def get_meso_model(data_params, input_params=None,
     for histname, hist in hists.items():
         modelhist = getattr(model, histname)
         if hist is not None and hist.cur_tidx > modelhist.cur_tidx:
-            # TODO: Move to histories.Series.set(Series)
-            #       When doing so, allow for assigning to a subslice
-            #assert(np.all(modelhist._tarr == hist._tarr))
-            assert(modelhist.dt == hist.dt)
-            assert(modelhist.t0 == hist.t0)
-            assert(modelhist.shape == hist.shape)
-            if modelhist._tarr[0] <= hist._tarr[0]:
-                src_startidx = 0
-                target_startidx = hist.get_tidx_for(0, modelhist)
-            else:
-                src_startidx = modelhist.get_tidx_for(0, hist)
-                target_startidx = 0
-            if modelhist._tarr[-1] >= hist._tarr[hist.cur_tidx]:
-                src_stopidx = hist.cur_tidx
-                target_stopidx = hist.get_tidx_for(hist.cur_tidx, modelhist)
-            else:
-                target_stopidx = len(modelhist._tarr)
-                src_stopidx = modelhist.get_tidx_for(target_stopidx, hist)
-            assert(target_stopidx-target_startidx == src_stopidx-src_startidx)
-            modelhist[target_startidx:target_stopidx] = hist[src_startidx:src_stopidx]
-            #modelhist._data = hist._data.astype(modelhist._data.dtype)
+            set_history(modelhist, hist)
 
     return model
+
+def set_history(modelhist, hist):
+    # TODO: Move to histories.Series.set(Series)
+    #       When doing so, allow for assigning to a subslice
+    #assert(np.all(modelhist._tarr == hist._tarr))
+    assert(modelhist.dt == hist.dt)
+    assert(modelhist.t0 == hist.t0)
+    assert(modelhist.shape == hist.shape)
+    if modelhist._tarr[0] <= hist._tarr[0]:
+        src_startidx = 0
+        target_startidx = hist.get_tidx_for(0, modelhist)
+    else:
+        src_startidx = modelhist.get_tidx_for(0, hist)
+        target_startidx = 0
+    if modelhist._tarr[-1] >= hist._tarr[hist.cur_tidx]:
+        src_stopidx = hist.cur_tidx
+        target_stopidx = hist.get_tidx_for(hist.cur_tidx, modelhist)
+    else:
+        target_stopidx = len(modelhist._tarr)
+        src_stopidx = modelhist.get_tidx_for(target_stopidx, hist)
+    assert(target_stopidx-target_startidx == src_stopidx-src_startidx)
+    modelhist[target_startidx:target_stopidx] = hist[src_startidx:src_stopidx]
+    #modelhist._data = hist._data.astype(modelhist._data.dtype)
 
 def get_model_params(params, model_type):
     """Convert a ParameterSet to the internal parameter type used by models.
