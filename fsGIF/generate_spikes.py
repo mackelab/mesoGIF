@@ -105,12 +105,12 @@ if __name__ == "__main__":
     #     spikename_params.input = spikename_params.input.params
     # END HACK
     def get_filename(label, suffix):
-        spike_filename = core.add_extension(
+        return core.add_extension(
             core.get_pathname(data_dir  = data_dir,
                               params    = spikename_params,
                               subdir    = 'spikes',
                               suffix    = suffix,
-                              label     = label)
+                              label     = label) )
 
     spike_filename = get_filename(label='', suffix='')
     spike_activity_filename = get_filename(label='', suffix='activity')
@@ -130,9 +130,11 @@ if __name__ == "__main__":
     try:
         # Try to load data to see if it's already been calculated
         shist = ml.iotools.load(spike_filename)
-    except core.FileNotFound:
+    except (FileNotFoundError, core.FileNotFound):
+        # FIXME: ml.iotools.load does not raise `core.FileNotFound`
         generate_data = True
     except core.FileRenamed:
+        # FIXME Will never happen: ml.iotools.load does not raise FileRenamed
         # The --recalculate flag was passed and the original data file renamed
         # Do the same with the associated activity file
         generate_data = True
@@ -152,11 +154,11 @@ if __name__ == "__main__":
             spike_activity_filename = "shist_activity_debug.npr"
             spike_a_filename = "shist_E_activity_debug.npr"
         else:
-            spike_filename = get_filename(suffix='', label=None)
+            spike_filename = get_filename(suffix='', label=mgr.label)
             spike_activity_filename = get_filename(suffix='activity',
-                                                   label=None))
+                                                   label=mgr.label)
             spike_a_filename = get_filename(suffix='expected_activity',
-                                            label=None)
+                                            label=mgr.label)
 
         # Generate spikes
         model = generate_spikes(mgr)
