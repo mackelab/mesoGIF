@@ -1,5 +1,6 @@
 import sys
 import os.path
+from itertools import chain
 import numpy as np
 from tqdm import tqdm
 
@@ -42,7 +43,7 @@ def load_fitcollection(paramsets):
 
     return fitcoll
 
-def update_params(baseparams, *newparams):
+def update_params(baseparams, *newparams, mask=None):
     """
     Construct a parameter set based on `baseparams`, replacing with the
     values in `newparams`. Multiple `newparams` can be given; the latest
@@ -59,13 +60,33 @@ def update_params(baseparams, *newparams):
         Must contain an entry corresponding to each entry in the newparams.
 
     *newparams: dictionaries
+
+    mask: dict
+        Dictionary of boolean masks, keyed by parameter name.
+        Should match the posterior.mask parameter.
+        Always provided as keyword.
     """
     baseparams = ml.parameters.params_to_arrays(baseparams)
+    if mask is None: mask = {}
     for paramset in newparams:
         paramset = ml.parameters.params_to_arrays(paramset)
         for key, val in paramset.items():
-            paramset[key] = val.reshape(baseparams[key].shape)
-        baseparams.update(paramset)
+            pmask = np.array(mask.get(key, True))
+            baseparam = baseparams[key]
+            shape = baseparam.shape   # HACK-y way to make sure we keep shape
+            restype = np.result_type(
+                  *chain((np.min_scalar_type(p) for p in baseparam.flat),
+                         (np.min_scalar_type(p) for p in paramset[key].flat)))
+            baseparams[key] = baseparam.astype(restype)
+            if pmask.ndim > baseparam.ndim:
+                pmask = pmask.reshape(baseparam.shape)
+            #paramset[key] = val.reshape(baseparams[key].shape)
+            baseparam = baseparams[key][pmask]   # Need this intermediate var
+            baseparam.flat = val.flat            # otherwise assignment is
+            baseparams[key][pmask] = baseparam   # ignored
+            baseparams[key] = baseparams[key].reshape(shape)
+
+        #baseparams.update(paramset)
     return baseparams
 
 def create_activity_paramset(paramset, base_paramset, export=None):

@@ -168,7 +168,7 @@ def plot_fit(flat_params, fitcoll, ncols, colwidth, rowheight, title=None,
     if format is None:
         format = {}
 
-    nrows = np.ceil(len(flat_params) / (ncols+blank_cols)).astype(np.int)
+    nrows = np.ceil(len(flat_params) / ncols).astype(np.int)
 
     fig = plt.figure(figsize=((ncols+blank_cols)*colwidth, nrows*rowheight))
 
@@ -176,8 +176,8 @@ def plot_fit(flat_params, fitcoll, ncols, colwidth, rowheight, title=None,
     masks = ml.parameters.params_to_arrays(fitcoll.reffit.parameters.posterior.mask)
 
     for i, (varname, idx) in enumerate(flat_params):
-        axidx = i + (i // ncols) * blank_cols
-        ax = plt.subplot(nrows, ncols+blank_cols, i+1)
+        axidx = i + (i // ncols) * blank_cols + 1
+        ax = plt.subplot(nrows, ncols+blank_cols, axidx)
         mask = masks[varname]
         if mask is None:
             mask = np.ones(modelparams[varname].shape, dtype=bool)
@@ -1042,7 +1042,7 @@ def get_meso_model(data_params, input_params=None,
         for histname, hist in hists.items():
             if hist is not None:
                 hists[histname] = subsample(hist, model_params.dt)
-            hist.lock()
+                hist.lock()
         data_history = hists['A']
         rndstream = None
 
