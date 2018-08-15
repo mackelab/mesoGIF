@@ -261,7 +261,15 @@ def get_pymc_model(params, model, batch_size):
 
     return pymc_model, priors, start, batch_size_var
 
-def get_sgd(params, model, pymc_model, start_var, batch_size_var):
+def get_sgd(params, model, pymc_model,
+            start_var, batch_size_var, var_subs=None):
+    """
+    Parameters
+    ----------
+    ...
+    var_subs: dict
+        Dictionary of {old var: new var} pairs.
+    """
 
     # def cost(tidx, batch_size):
     #     logL = model.loglikelihood(tidx, batch_size)[0]
@@ -272,6 +280,9 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
     #         # This is probably due to some internal constants
     #         # which are double precision.
     #     return logL + prior_logp
+
+    # Default values
+    if var_subs is None: var_subs = {}
 
     # Get the variables to track
     # We track the non-transformed variables of the prior. For each variable,
@@ -314,6 +325,14 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
         raise ValueError("Unrecognized cost descriptor '{}'"
                          .format(params.sgd.cost))
 
+    # Wrap advance_updates with a function which substitutes model
+    # for PyMC3 variables
+    def advance_updates(stopidx):
+        updates = model.advance_updates(stopidx)
+        for var, upd in updates.items():
+            updates[var] = shim.graph.clone(upd, replace=var_subs)
+        return updates
+
     # model_reset is probably not required
     def model_reset(**kwargs):
         values = copy.copy(kwargs)
@@ -342,7 +361,7 @@ def get_sgd(params, model, pymc_model, start_var, batch_size_var):
         cost_format = 'logL',
         optimize_vars = pymc_model.vars,
         track_vars = track_vars,
-        advance = model.advance_updates,
+        advance = advance_updates,
         reset = None,
         initialize = model_initialize,
         start = start,
@@ -608,7 +627,10 @@ if __name__ == "__main__":
     pymc_model, pymc_priors, start_var, batch_size_var = \
         get_pymc_model(mgr.params.posterior, model, mgr.params.sgd.batch_size)
     if prev_run is None:
-        sgd = get_sgd(mgr.params, model, pymc_model, start_var, batch_size_var)
+        var_subs = {prior.model_var: prior.pymc_var
+                    for prior in pymc_priors.values()}
+        sgd = get_sgd(mgr.params, model, pymc_model,
+                      start_var, batch_size_var, var_subs)
 
     # Check if the fit has already been done
     skipped = False
