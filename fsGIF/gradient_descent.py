@@ -379,6 +379,24 @@ def get_sgd(params, model, pymc_model,
     model.clear_unlocked_histories()
     model.theano_reset() # TODO: deprecated ?
 
+    # Replace model variables with the PyMC3 ones
+    # TODO: Compilation of `advance` within SGD no longer necessary;
+    # just pass `advance` method directly
+    subs = {}
+    for pname in model.params._fields:
+        p = getattr(model.params, pname)
+        if shim.is_theano_variable(p):
+            subs[pname] = shim.graph.clone(getattr(model.params, pname),
+                                       replace=var_subs)
+        elif p in var_subs:
+            subs[pname] = var_subs[p]
+    # Replace the model/PyMC3 variables with those SGD will optimize
+    subs = {pname: shim.graph.clone(p, replace=sgd.var_subs)
+            for pname, p in subs.items()}
+    model.params = model.params._replace(**subs)
+    # Ensure the advance function will be recompiled to use the new parameters
+    model.clear_advance_function()
+
     if debugprint:
         sgd.dbgstart = start  # Handle to help debugging
 
@@ -631,6 +649,8 @@ if __name__ == "__main__":
                     for prior in pymc_priors.values()}
         sgd = get_sgd(mgr.params, model, pymc_model,
                       start_var, batch_size_var, var_subs)
+        sgd.model = model             # Debugging handles
+        sgd.pymc_model = pymc_model
 
     # Check if the fit has already been done
     skipped = False
