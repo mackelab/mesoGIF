@@ -203,7 +203,8 @@ def get_model_vars(params, model, prune=None):
         # Only return vars which match one of the elements in prune.
         # Replace symbolic variables by their names
         prune = [getattr(v, 'name', v) for v in prune]
-        modelvars = [v for v in modelvars if v.name in prune]
+        modelvars = [v for v in modelvars
+                       if v.name.replace('_model', '') in prune]
     return modelvars
 
 def get_pymc_model(params, model, batch_size):
@@ -239,8 +240,7 @@ def get_pymc_model(params, model, batch_size):
             # Must be large enough so that test_value slices are not empty
         batch_size_var.tag.test_value = 2
         logL_model = model.loglikelihood(start, batch_size_var, avg=False)[0]
-        logL = shim.graph.clone(logL_model, priors.subs) / batch_size_var
-            # Use average logL, so increasing batch size actually decreases variance
+        logL = shim.graph.clone(logL_model, priors.subs)
         def logL_fn(data):
             # Since logL depends on data before the minibatch, we can't just
             # compute the log-likelihood from `data`. Instead it depends on
@@ -253,7 +253,8 @@ def get_pymc_model(params, model, batch_size):
         shape = (batch_size,) + model.n.shape
         batch.tag.test_value = np.zeros(shape, dtype=batch.dtype)
         total_size = (datalen,)+model.n.shape
-        total_size = tuple(np.asscalar(s) for s in total_size)
+        total_size = tuple(np.asscalar(s) if hasattr(s, 'dtype') else s
+                           for s in total_size)
             # total_size must have pure Python types, not np.int_
         n = pm.DensityDist('n', logp=logL_fn, shape=shape,
                            dtype=model.n.dtype, testval=batch,
@@ -318,9 +319,11 @@ def get_sgd(params, model, pymc_model,
             model.initialize(t=t)
 
     if params.sgd.cost in ('loglikelihood', 'logL', 'log likelihood', 'log L'):
-        cost = shim.cast_floatX(pymc_model.n.logpt)
+        cost = shim.cast_floatX(pymc_model.n.logpt) / batch_size_var
+            # Use average logL, so increasing batch size actually decreases variance
     elif params.sgd.cost == 'posterior':
-        cost = shim.cast_floatX(pymc_model.logpt)
+        cost = shim.cast_floatX(pymc_model.logpt) / batch_size_var
+            # Idem
     else:
         raise ValueError("Unrecognized cost descriptor '{}'"
                          .format(params.sgd.cost))
@@ -649,8 +652,8 @@ if __name__ == "__main__":
                     for prior in pymc_priors.values()}
         sgd = get_sgd(mgr.params, model, pymc_model,
                       start_var, batch_size_var, var_subs)
-        sgd.model = model             # Debugging handles
-        sgd.pymc_model = pymc_model
+        sgd.model = model             # Debugging handle
+        sgd.pymc_model = pymc_model   # Debugging handle
 
     # Check if the fit has already been done
     skipped = False
