@@ -355,7 +355,7 @@ def get_sgd(params, model, pymc_model,
     model.clear_unlocked_histories()
     sgd = gd.SeriesSGD(
         # cost = shim.cast_floatX(pymc_model.logpt),
-        cost = pymc_model.logpt,
+        cost = cost,
             # FIXME: prior logp's still have dtype='float64', no matter the
             # value of floatX. This is probably due to some internal
             # constants which are double precision.
