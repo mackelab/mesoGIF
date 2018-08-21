@@ -1,3 +1,13 @@
+"""
+At the moment this is just `gradient_descent.py` with some extra code in
+__main__ that was added for debugging.
+To make a test, we should strip anything not required, hard code parameters
+or parameter paths and fix the debugging code so that we can change burnin
+and batch/datalength parameters (right now script needs to be restarted to
+change them). Then we can write code that compares `logL.eval()` to `sgd.cost()`
+for different batches and burnins.
+"""
+
 import os.path
 import copy
 import numpy as np
@@ -657,6 +667,12 @@ if __name__ == "__main__":
     # Load the gradient descent class
     model = get_model(mgr.params)
 
+    # DEBUG
+    # mgr.params.posterior.burnin = 0
+    # mgr.params.posterior.datalen = 100
+    burnin_shared = shim.shared(np.int32(mgr.params.posterior.burnin))
+    #batch_shared = shim.shared(np.int32(mgr.params.posterior.datalen))
+
     # Use double precision for priors. Avoids failures when sampling from tails
     #shim.config.floatX = 'float64'
     pymc_model, pymc_priors, start_var, batch_size_var = \
@@ -666,6 +682,8 @@ if __name__ == "__main__":
                     for prior in pymc_priors.values()}
         sgd = get_sgd(mgr.params, model, pymc_model,
                       start_var, batch_size_var, var_subs)
+        sgd.model = model             # Debugging handle
+        sgd.pymc_model = pymc_model   # Debugging handle
 
     # Check if the fit has already been done
     skipped = False
@@ -683,8 +701,32 @@ if __name__ == "__main__":
         logger.info("Starting gradient descent fit...")
         if 'floatX' in mgr.params:
             shim.config.floatX = mgr.params.floatX
-        sgd.fit(Nmax=mgr.params.sgd.max_iterations,
-                threadidx=mgr.args.threadidx)
+        model.advance(burnin_shared.get_value())
+        # Compare logLx, sgd.cost at different datalen, burnin, and
+        # different sets of fit parameters (including none at all)
+        logL = model.loglikelihood(burnin_shared, sgd.datalen)[0]/sgd.datalen
+        logL3 = shim.graph.clone(
+            shim.graph.clone(logL, replace=var_subs), replace=sgd.var_subs)
+        # logL3 isolates differences due to variable substitutions
+        logL1 = shim.graph.compile(pymc_model.vars, sgd.cost_graph1,
+                                   givens=[(sgd.tidx_var, burnin_shared),
+                                           (sgd.batch_size_var, sgd.datalen)])
+        point = [v.get_value() for v in sgd.optimize_vars_access.values()]
+        #logL1(*point)
+        vals = {getattr(pymc_model, nm): v.get_value()
+                for nm, v in sgd.optimize_vars_access.items()}
+        vals[sgd.tidx_var] = mgr.params.posterior.burnin
+        vals[sgd.batch_size_var] = mgr.params.posterior.datalen
+        # pymc_model.n.logpt.eval(vals) / 3  # Same value as cost
+        # logL2 = shim.graph.compile([], sgd.cost_graph2,
+        #                            givens=[(sgd.tidx_var, burnin_shared),
+        #                                    (sgd.batch_size_var, sgd.datalen)])
+        #[(v, v in shim.graph.inputs([sgd.cost_graph2])) for v in var_subs]
+        # The two following lists should match
+        # model_vals = [(v.name, v.get_value()) for v in var_subs]
+        #  sgd_vals = [(v.name, inv_trans(v.get_value())) for v in sgd.optimize_vars]
+        import pdb; pdb.set_trace()
+        sgd.fit(Nmax=mgr.params.sgd.max_iterations, threadidx=mgr.args.threadidx)
 
     if not skipped:
         if mgr.args.debug:

@@ -2192,6 +2192,7 @@ class GIF_mean_field(models.Model):
         # yt
         red_factor = shim.exp(-self.y.dt/self.params.τ_s)
         yt = self.A_Δ[tidx+self.A_Δ.t0idx] + (y0 - self.A_Δ[tidx+self.A_Δ.t0idx]) * red_factor
+        yt.name = 'yt'
         if debugprint: yt = shim.print(yt)
 
         # htot
