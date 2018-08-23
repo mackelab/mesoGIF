@@ -320,10 +320,10 @@ def get_sgd(params, model, pymc_model,
             model.initialize(t=t)
 
     if params.sgd.cost in ('loglikelihood', 'logL', 'log likelihood', 'log L'):
-        cost = shim.cast_floatX(pymc_model.n.logpt) / batch_size_var
+        cost = shim.cast_floatX(pymc_model.n.logpt) / batch_size_var * datalen
             # Use average logL, so increasing batch size actually decreases variance
     elif params.sgd.cost == 'posterior':
-        cost = shim.cast_floatX(pymc_model.logpt) / datalen
+        cost = shim.cast_floatX(pymc_model.logpt)
             # Idem
             # The logp of `n` *should* be be upscaled to the size of the data
             # (making it comparable with priors) but I haven't explicitly
