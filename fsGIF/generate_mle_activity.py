@@ -13,6 +13,7 @@ from sinn.optimize.gradient_descent import FitCollection
 import mackelab as ml
 import mackelab.iotools as iotools
 import mackelab.parameters
+import mackelab.utils
 
 from fsGIF import core
 logger = core.logger
@@ -75,8 +76,8 @@ def update_params(baseparams, *newparams, mask=None):
             baseparam = baseparams[key]
             shape = baseparam.shape   # HACK-y way to make sure we keep shape
             restype = np.result_type(
-                  *chain((np.min_scalar_type(p) for p in baseparam.flat),
-                         (np.min_scalar_type(p) for p in paramset[key].flat)))
+                  *chain((ml.utils.min_scalar_type(p) for p in baseparam.flat),
+                         (ml.utils.min_scalar_type(p) for p in paramset[key].flat)))
             baseparams[key] = baseparam.astype(restype)
             if pmask.ndim > baseparam.ndim:
                 pmask = pmask.reshape(baseparam.shape)
