@@ -74,25 +74,13 @@ def generate_input(params):
             modelparams = Model.Parameters()
                 # Remove this line once we use ParameterSets
             shape = tuple(_hist_params.pop('shape'))
-            init = _hist_params.pop('init', None)
+            init = _hist_params.pop('init_cond', None)
 
             # Create the Series history
             # TODO: Allow for 'iterative=False' option ?
             hist = Series(name=histname, shape=shape,
                           t0=params.t0, tn=params.tn, dt=params.dt,
                           dtype=shim.config.floatX)
-
-            if init is not None:
-                # Initialize the history
-                if init.shape == shape:
-                    # Add time dimension
-                    init = init.reshape((1,) + shape)
-                elif not init.shape[1:] == shape:
-                    raise ValueError("`init` (shape: {}) doesn't match "
-                                     "the expected shape ({})."
-                                     .format(init.shape, shape))
-                hist.pad(len(init))
-                hist[:len(init)] = init
 
             # Get random number generator
             if Model.requires_rng:
@@ -101,6 +89,9 @@ def generate_input(params):
             # Create the model
             # FIXME: Only models with one public history are currently supported
             model = Model(modelparams, hist, **_hist_params)
+
+            # Initialize it
+            model.initialize(init)
 
             # Finally, add the appropriate history to the list
             hists[histname] = model.public_histories[0]
