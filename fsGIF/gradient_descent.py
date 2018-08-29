@@ -467,6 +467,7 @@ def get_previous_run(params, resume=True):
         if not resume:
             # Don't resume: just reload the previous run
             prev_run = None
+    return prev_run
 
 def get_init_vals(params, pymc_model, priors):
     init_params = params.init_vals
@@ -666,6 +667,9 @@ if __name__ == "__main__":
                     for prior in pymc_priors.values()}
         sgd = get_sgd(mgr.params, model, pymc_model,
                       start_var, batch_size_var, var_subs)
+    else:
+        # WARNING: Untested
+        sgd = prev_run
 
     # Check if the fit has already been done
     skipped = False
