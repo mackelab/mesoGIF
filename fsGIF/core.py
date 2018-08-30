@@ -30,6 +30,7 @@ import sinn.histories as histories
 import sinn.iotools as iotools
 import sinn.analyze as anlz
 from sinn.analyze.heatmap import HeatMap
+from sinn.optimize.gradient_descent import FitCollection
 
 from parameters import ParameterSet
 
@@ -1168,6 +1169,131 @@ def construct_model(model_module, model_params, data_history, input_history, ini
         data_history,
         input_history,
         initializer=initializer)
+
+###########################
+# Dealing with fit results
+###########################
+
+def update_params(baseparams, *newparams, mask=None):
+    """
+    Construct a parameter set based on `baseparams`, replacing with the
+    values in `newparams`. Multiple `newparams` can be given; the latest
+    (rightmost) ones have precedence.
+
+    `baseparams` is updated in place; make a copy first if you need to keep
+    the original.
+
+    ..Note: Currently only works with non-nested parameter sets.
+
+    Parameters
+    ----------
+    baseparams:  ParameterSet
+        Must contain an entry corresponding to each entry in the newparams.
+
+    *newparams: dictionaries
+
+    mask: dict
+        Dictionary of boolean masks, keyed by parameter name.
+        Should match the posterior.mask parameter.
+        Always provided as keyword.
+    """
+    baseparams = ml.parameters.params_to_arrays(baseparams)
+    if mask is None: mask = {}
+    for paramset in newparams:
+        paramset = ml.parameters.params_to_arrays(paramset)
+        for key, val in paramset.items():
+            pmask = np.array(mask.get(key, True))
+            baseparam = baseparams[key]
+            shape = baseparam.shape   # HACK-y way to make sure we keep shape
+            restype = np.result_type(
+                  *itertools.chain((ml.utils.min_scalar_type(p) for p in baseparam.flat),
+                         (ml.utils.min_scalar_type(p) for p in paramset[key].flat)))
+            baseparams[key] = baseparam.astype(restype)
+            if pmask.ndim > baseparam.ndim:
+                pmask = pmask.reshape(baseparam.shape)
+            #paramset[key] = val.reshape(baseparams[key].shape)
+            baseparam = baseparams[key][pmask]   # Need this intermediate var
+            baseparam.flat = val.flat            # otherwise assignment is
+            baseparams[key][pmask] = baseparam   # ignored
+            baseparams[key] = baseparams[key].reshape(shape)
+
+        #baseparams.update(paramset)
+    return baseparams
+
+def get_pset(fit, model_params, seed=314):
+    # Allow changing ParameterSet values with keywords
+    if isinstance(fit, FitCollection):
+        fit = fit.reffit
+    p = ParameterSet({
+         'model': fit.parameters.posterior.model.params,
+         'input': fit.parameters.posterior.input,
+         'seed': seed,
+         'initializer': fit.parameters.posterior.model.initializer,
+         'theano': False,
+         't0': 0.,
+         'tn': 20.,
+         'dt': 0.001,
+    })
+
+    mask = fit.parameters.posterior.mask
+    p.model = update_params(p.model, model_params, mask=mask)
+
+    return p
+
+def get_result_pset(fit, seed=314):
+    return get_pset(fit, fit.result, seed)
+
+def get_result_activity_filename(pset):
+    return core.get_pathname(data_dir = 'data',
+                             params = pset,
+                             subdir = 'activity',
+                             suffix = '',
+                             label_dir = 'run_dump',
+                             label = '')
+
+def get_mle_params_file(pset):
+    filename = ml.parameters.get_filename(pset)[:8]
+        # Use just 8 first characters of hash since this is a user-facing name
+    return "params/result-params/" + filename + ".params"
+
+def save_result_params(pset):
+    pathname = get_mle_params_file(pset)
+    os.makedirs(os.path.dirname(pathname), exist_ok=True)
+    ml.parameters.params_to_lists(pset).save(pathname)
+    return pathname
+
+def get_result_sim(fitcoll, seed=314):
+    """
+    Returns
+    -------
+    Activity Series, if simulation is found. `None` otherwise.
+    """
+
+    # Dictionary mapping cost string in parameters with string in reason
+    estimates = {'posterior': 'map',
+                 'loglikelihood': 'mle'}
+
+    p = get_result_pset(fitcoll, seed)
+    fn = get_result_activity_filename(p)
+
+    try:
+        Amle = ml.iotools.load(fn)
+    except FileNotFoundError as e:
+        print(e); print()
+        # TODO: Use variable for save location
+        mle_params_file = save_result_params(p)
+        sgd = fitcoll.reffit.parameters.sgd
+        print("Run simulation first:")
+        print('smt run -m fsGIF/fsGIF/generate_activity.py '
+              '--reason "{}-activity_[data]_lr-{}_batch-{}_[fit params]" {}'
+              .format(estimates[sgd.cost], sgd.optimizer_kwargs.lr, sgd.batch_size),
+                      pathname)
+        print("\nPosterior mask:")
+        print(fitcoll.reffit.parameters.posterior.mask.pretty())
+        return None
+    else:
+        return Amle
+
 
 ###########################
 # Data processing functions

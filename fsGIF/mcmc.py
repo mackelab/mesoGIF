@@ -114,16 +114,20 @@ class Model(pymc.model.Model):
             return f(*args, **kwargs)
         return makefn_wrapper
 
-def get_pymc_model(mgr, model):
+def get_pymc_model(mgr, model=None):
     return get_pymc_model_new(mgr.params.posterior, model)
 
-def get_pymc_model_new(params, model):
+def get_pymc_model_new(params, model=None):
+    if model is None:
+        model = get_model_new(params)
     varnames = getattr(params, 'variables',
                        list(params.mask.keys()))
     varnames = list(varnames)
         # Easier to dynamically remove elements from a list than an array
     masks = getattr(params, 'mask', {})
     #priorparams = params.model.prior
+    # TODO: Use gradient_descent.py's `get_prior_params`
+    #       Move that to core.
     priorparams = ParameterSet(
         {key: value for key, value in params.model.prior.items()
          if key in varnames})
@@ -157,13 +161,31 @@ def get_pymc_model_new(params, model):
 
     return pymc_model, priors
 
-def run_mcmc(mgr, model):
-    pymc_model, priors = get_pymc_model(mgr, model)
-    kwds = mgr.params.sampler
-    if 'start' not in kwds:
-        start = get_mle_start(mgr.params.posterior, priors)
-        if start is not None:
-            kwds['start'] = start
+def get_map(params):
+    if 'map' in params:
+        if 'model' in mgr.params.map:
+            # MAP is actually a complete parameter set for a sim
+            # Extract just the parameters
+            map = mgr.params.map.model
+        else:
+            # MAP is just the parameters
+            map = mgr.params.map
+    else:
+        map = None
+    return map
+
+def run_mcmc(mgr, pymc_model, priors):
+    params = mgr.params
+    kwds = params.sampler
+    map = get_map(params)
+    if map is not None:
+       map = apply_prior_transform(map, priors)
+    if 'start' not in kwds or str(kwds.start).lower() == 'map':
+        if map is not None:
+            kwds['start'] = map
+        # start = get_mle_start(mgr.params.posterior, priors)
+        # if start is not None:
+        #     kwds['start'] = start
     if 'trace' in kwds:
         # Load a trace to start from
         start_trace_params = kwds['trace']
@@ -175,70 +197,96 @@ def run_mcmc(mgr, model):
         start_trace_filename = "mcmc_debug.dill"
         kwds['trace'] = ml.pymc3.import_multitrace(ml.iotools.load(start_trace_filename))
 
+    # Get an initial mass matrix with diagonal of Hessian. Much cheaper
+    # to compute andgood enough if correlations are weak
+    # TODO: Add flag to compute full Hessian
+    if map is not None:
+        # TODO: Actually use map to initialize mass matrix
+        pass
+
     with pymc_model:
         # shim.config.floatX = 'float64'
             # Doing calculations with double precision can avoid gradients going
             # because of numerical errors to zero
         # if 'nuts_kwargs' not in kwds: kwds['nuts_kwargs'] = {}
         # kwds['nuts_kwargs']['casting'] = 'same_kind'
+        if 'step' in kwds:
+            Step = getattr(pymc, kwds.step['class'])
+            stepkwargs = kwds.step.get('kwargs', {})
+            kwds.step = Step(**stepkwargs)
+        else:
+            kwds.step = None
         trace = pymc.sample(**kwds)
 
     return trace
 
-def get_mle_start(posterior_params, priors):
-    dataroot = "data"
-        # HACK/TODO: Get this from sumatra project
-    filename = ml.parameters.get_filename(posterior_params) + '.repr'
-    pathname = os.path.join(dataroot, "MLE", filename)
-    try:
-        mlestr = iotools.load(pathname)
-    except FileNotFoundError:
-        return None
-    else:
-        mles = ParameterSet(eval(mlestr, {'array': np.array}))
-            # FIXME: Don't use eval()
-        start = {}
-        for prior in priors.values():
-            mle = mles[prior.transform.names.orig]
-            if prior.mask is not None:
-                mle = mle[prior.mask]
-            start[prior.transform.names.new] = prior.transform.to(mle)
-        return start
+# def get_mle_start(posterior_params, priors):
+#     dataroot = "data"
+#         # HACK/TODO: Get this from sumatra project
+#     filename = ml.parameters.get_filename(posterior_params) + '.repr'
+#     pathname = os.path.join(dataroot, "MLE", filename)
+#     try:
+#         mlestr = iotools.load(pathname)
+#     except FileNotFoundError:
+#         return None
+#     else:
+#         mles = ParameterSet(eval(mlestr, {'array': np.array}))
+#             # FIXME: Don't use eval()
+#         return apply_prior_mask(mles, priors)
+#         # start = {}
+#         # for prior in priors.values():
+#         #     mle = mles[prior.transform.names.orig]
+#         #     if prior.mask is not None:
+#         #         mle = mle[prior.mask]
+#         #     start[prior.transform.names.new] = prior.transform.to(mle)
+#         # return start
 
-def get_model(mgr):
-    postparams = mgr.params.posterior
-    data_filename  = mgr.get_pathname(params = postparams.data.params,
-                                      subdir = postparams.data.dir,
-                                      suffix = postparams.data.name,
-                                      label = '')
-    data_filename = core.add_extension(data_filename)
-    # flat_params = mackelab.parameters.params_to_arrays(postparams.data.params).flatten()
-    # f, _ = mackelab.iotools.get_free_file("debug_dump", bytes=False)
-    # f.write('\n'.join(str(key) + ', ' + str(flat_params[key]) for key in sorted(flat_params)))
-    # f.close
-    input_filename = mgr.get_pathname(params = postparams.input.params,
-                                      subdir = postparams.input.dir,
-                                      suffix = postparams.input.name,
-                                      label = '')
-    input_filename = core.add_extension(input_filename)
+def apply_prior_transform(params, priors):
+    # TODO: Make this a method of `params`
+    # TODO: Change name to `transform_to_pymc` ?
+    new_params = {}
+    for prior in priors.values():
+        p = params[prior.transform.names.orig]
+        if prior.mask is not None:
+            mask = prior.mask.reshape(p.shape)
+            p = p[mask]
+        new_params[prior.transform.names.new] = prior.transform.to(p).flatten()
+    return new_params
 
-    data_history = mgr.load(data_filename,
-                            cls=getattr(histories, postparams.data.type).from_raw,
-                            calc='activity',
-                            recalculate=False)
-    # TODO: cast data_history to float32 instead of relying on subsample
-    data_history = core.subsample(data_history, postparams.model.dt)
-
-    input_history = mgr.load(input_filename,
-                             cls=getattr(histories, postparams.input.type).from_raw,
-                             calc='input',
-                             recalculate=False)
-    # TODO: cast input_history to float32 instead of relying on subsample
-    input_history = core.subsample(input_history, postparams.model.dt)
-
-    model = core.construct_model(gif, postparams.model, data_history, input_history,
-                                 initializer=postparams.model.initializer)
-    return model
+# def get_model(mgr):
+#     postparams = mgr.params.posterior
+#     data_filename  = mgr.get_pathname(params = postparams.data.params,
+#                                       subdir = postparams.data.dir,
+#                                       suffix = postparams.data.name,
+#                                       label = '')
+#     data_filename = core.add_extension(data_filename)
+#     # flat_params = mackelab.parameters.params_to_arrays(postparams.data.params).flatten()
+#     # f, _ = mackelab.iotools.get_free_file("debug_dump", bytes=False)
+#     # f.write('\n'.join(str(key) + ', ' + str(flat_params[key]) for key in sorted(flat_params)))
+#     # f.close
+#     input_filename = mgr.get_pathname(params = postparams.input.params,
+#                                       subdir = postparams.input.dir,
+#                                       suffix = postparams.input.name,
+#                                       label = '')
+#     input_filename = core.add_extension(input_filename)
+#
+#     data_history = mgr.load(data_filename,
+#                             cls=getattr(histories, postparams.data.type).from_raw,
+#                             calc='activity',
+#                             recalculate=False)
+#     # TODO: cast data_history to float32 instead of relying on subsample
+#     data_history = core.subsample(data_history, postparams.model.dt)
+#
+#     input_history = mgr.load(input_filename,
+#                              cls=getattr(histories, postparams.input.type).from_raw,
+#                              calc='input',
+#                              recalculate=False)
+#     # TODO: cast input_history to float32 instead of relying on subsample
+#     input_history = core.subsample(input_history, postparams.model.dt)
+#
+#     model = core.construct_model(gif, postparams.model, data_history, input_history,
+#                                  initializer=postparams.model.initializer)
+#     return model
 
 def get_model_new(params):
     """
@@ -292,8 +340,8 @@ if __name__ == "__main__":
     else:
         logger.info("Theano using only CPU")
 
-    model = get_model(mgr)
-    trace = run_mcmc(mgr, model)
+    pymc_model, priors = get_pymc_model_new(mgr.params.posterior)
+    trace = run_mcmc(mgr, pymc_model, priors)
 
     if mgr.args.debug:
         mcmc_filename = "mcmc_debug.dill"
