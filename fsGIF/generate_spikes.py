@@ -63,6 +63,13 @@ def generate_spikes(mgr):
     # TODO: if dt different from Ihist, subsample Ihist
     shist = Spiketrain(Ihist, name='s', pop_sizes = params.model.N, iterative=True,
                        **runparams)
+    if shist.t0 < Ihist.t0:
+        raise ValueError("You asked to generate spikes starting from {}, but "
+                         "the input only starts at {}."
+                         .format(shist.t0, Ihist.t0))
+    if shist.tn > Ihist.tn:
+        raise ValueError("You asked to generate spikes up to {}, but the input "
+                         "is only provided up {}.".format(shist.tn, Ihist.tn))
     model_params_sampler = ml.parameters.ParameterSetSampler(params.model)
     model_params = core.get_model_params(model_params_sampler.sample(),
                                          'GIF_spiking')
@@ -190,3 +197,6 @@ if __name__ == "__main__":
         # ahist.set()
         ahist = anlz.mean(model.λ, shist.pop_slices)
         iotools.save(spike_a_filename, ahist, format='npr')
+    else:
+        logger.info("Simulation already computed; skipping. Location: {}."
+                    .format(spike_filename) )
