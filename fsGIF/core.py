@@ -38,8 +38,11 @@ from parameters import ParameterSet
 # Model import
 import fsGIF.fsgif_model as gif
 from fsGIF.fsgif_model import GIF_spiking
-data_dir = "data"
+home_dir = "/home/alex/Recherche/macke_lab/run/fsGIF"
+# home_dir = os.path.dirname(os.path.dirname(__file__))
+data_dir = home_dir + "/data"
 label_dir = "run_dump"
+param_dir = home_dir + "/params"
 ############################
 
 
@@ -1220,13 +1223,41 @@ def update_params(baseparams, *newparams, mask=None):
         #baseparams.update(paramset)
     return baseparams
 
-def get_pset(fit, model_params, seed=314):
+def get_pset(fit, model_params, input_params=None, seed=314):
     # Allow changing ParameterSet values with keywords
     if isinstance(fit, FitCollection):
         fit = fit.reffit
+    if input_params == None:
+        input_params = fit.parameters.posterior.input
+    elif isinstance(input_params, str):
+        c = input_params.strip()[0] # Use first char to identify format
+        if c == '{':
+            # `input_params` is a param set in string format
+            input_params = ParameterSet(input_params)
+        else:
+            # Assume a url
+            if c != '/':
+                # URL is relative to project directory
+                # Need to use an absolute path, because this file may be
+                # executed from elsewhere.
+                input_params = os.path.join(param_dir, input_params)
+            input_params = ParameterSet(input_params)
+    if 'params' not in input_params:
+        # input_params is only the internal 'params' component
+        # Expand with defaults
+        input_params = ParameterSet({
+          'params': input_params,
+          'dir': "inputs",
+          'name': "",
+          'type': "Series"
+        })
+    else:
+        assert(all(key in input_params
+                   for key in ['params', 'dir', 'name', 'type']))
+
     p = ParameterSet({
          'model': fit.parameters.posterior.model.params,
-         'input': fit.parameters.posterior.input,
+         'input': input_params,
          'seed': seed,
          'initializer': fit.parameters.posterior.model.initializer,
          'theano': False,
@@ -1240,21 +1271,21 @@ def get_pset(fit, model_params, seed=314):
 
     return p
 
-def get_result_pset(fit, seed=314):
-    return get_pset(fit, fit.result, seed)
+def get_result_pset(fit, input_params=None, seed=314):
+    return get_pset(fit, fit.result, input_params=input_params, seed=seed)
 
-def get_result_activity_filename(pset):
-    return core.get_pathname(data_dir = 'data',
-                             params = pset,
-                             subdir = 'activity',
-                             suffix = '',
-                             label_dir = 'run_dump',
-                             label = '')
+def get_result_activity_filename(pset, suffix=''):
+    return get_pathname(data_dir = data_dir,
+                        params = pset,
+                        subdir = 'activity',
+                        suffix = suffix,
+                        label_dir = 'run_dump',
+                        label = '')
 
 def get_mle_params_file(pset):
     filename = ml.parameters.get_filename(pset)[:8]
         # Use just 8 first characters of hash since this is a user-facing name
-    return "params/result-params/" + filename + ".params"
+    return os.path.join(param_dir, "result-params/" + filename + ".params")
 
 def save_result_params(pset):
     pathname = get_mle_params_file(pset)
@@ -1262,7 +1293,42 @@ def save_result_params(pset):
     ml.parameters.params_to_lists(pset).save(pathname)
     return pathname
 
-def get_result_sim(fitcoll, seed=314):
+def get_param_sim(pset, suffix='', desc="", missing_msgs=None):
+    """
+    Parameters
+    ----------
+    pset: ParameterSet
+    suffix: str
+        Data filename suffix
+    desc: str
+        Simulation description. Used as argument to `--reason`
+    missing_messages: iterable of strings
+        Extra information to print if simulation data is missing.
+        One line per list element.
+    """
+    fn = get_result_activity_filename(pset, suffix=suffix)
+    if missing_msgs is None:
+        missing_msgs = []
+
+    try:
+        sim = ml.iotools.load(fn)
+    except FileNotFoundError as e:
+        print(e); print()
+        # TODO: Use variable for save location
+        params_file = save_result_params(pset)
+        print("Run simulation first:")
+        print('smt run -m fsGIF/fsGIF/generate_activity.py '
+              '--reason "{}" {}'.format(desc, params_file))
+        if missing_msgs is not None:
+            if isinstance(missing_msgs, str):
+                missing_msgs = [missing_msgs]
+            for msg in missing_msgs:
+                print(msg)
+        return None
+    else:
+        return sim
+
+def get_result_sim(fitcoll, suffix='', input_params=None, seed=314):
     """
     Returns
     -------
@@ -1272,28 +1338,67 @@ def get_result_sim(fitcoll, seed=314):
     # Dictionary mapping cost string in parameters with string in reason
     estimates = {'posterior': 'map',
                  'loglikelihood': 'mle'}
+    sgd = fitcoll.reffit.parameters.sgd
+    desc = ('{}-activity_[data]_lr-{}_batch-{}_[fit params]'
+            .format(estimates[sgd.cost], sgd.optimizer_kwargs.lr,
+                      sgd.batch_size))
+    p = get_result_pset(fitcoll, input_params=input_params, seed=seed)
+    return get_param_sim(
+          p, suffix=suffix,
+          desc = desc,
+          missing_msgs = ["\nPosterior mask:",
+                             fitcoll.reffit.parameters.posterior.mask.pretty()])
 
-    p = get_result_pset(fitcoll, seed)
-    fn = get_result_activity_filename(p)
+###########################
+# Dealing with heterogeneous populations
+###########################
 
-    try:
-        Amle = ml.iotools.load(fn)
-    except FileNotFoundError as e:
-        print(e); print()
-        # TODO: Use variable for save location
-        mle_params_file = save_result_params(p)
-        sgd = fitcoll.reffit.parameters.sgd
-        print("Run simulation first:")
-        print('smt run -m fsGIF/fsGIF/generate_activity.py '
-              '--reason "{}-activity_[data]_lr-{}_batch-{}_[fit params]" {}'
-              .format(estimates[sgd.cost], sgd.optimizer_kwargs.lr, sgd.batch_size),
-                      pathname)
-        print("\nPosterior mask:")
-        print(fitcoll.reffit.parameters.posterior.mask.pretty())
-        return None
-    else:
-        return Amle
+def average_hetero_params(pset, transform=False):
+    """
+    Parameters
+    ----------
+    pset: ParameterSet
+    transform: bool
+       If True, do average over the transformed rather the original variables.
+    """
+    sampler = ml.parameters.ParameterSetSampler(pset)
 
+    vals = sampler.sample()
+
+    for v in sampler.sampled_varnames:
+        # Population sizes are separated with '+'
+        # So total number of populations is number of '+' + 1
+        slcs = []
+        if transform and 'transform' in pset[v]:
+            param_vals = ml.parameters.TransformedVar(pset[v].transform, orig=vals[v])
+        else:
+            param_vals = ml.parameters.NonTransformedVar(desc=None, orig=vals[v])
+
+        for d in pset[v].shape:
+            if isinstance(d, str):
+                pop_sizes = [int(s) for s in d.split('+')]
+                i = 0
+                dslcs = []
+                for size in pop_sizes:
+                    dslcs.append(slice(i, i+size))
+                    i += size
+                slcs.append(dslcs)
+            else:
+                slcs.append(None)
+        pop_slices = [s for s in filter(None, slcs)][0]
+        assert(all(d == pop_slices for d in filter(None, slcs)))
+        for i, (d, dslcs) in enumerate(zip(pset[v].shape, slcs)):
+            if dslcs is None:
+                slcs[i] = list(range(d))
+        shape = tuple(d if not isinstance(d, str) else len(pop_slices)
+                      for d, dslcs in zip(pset[v].shape, dslcs))
+        idcs = itertools.product(*slcs)
+
+        means = np.array([param_vals.new[idx].mean() for idx in idcs]).reshape(shape)
+
+        vals[v] = param_vals.back(means)
+
+    return vals
 
 ###########################
 # Data processing functions
