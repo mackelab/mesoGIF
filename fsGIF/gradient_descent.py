@@ -92,7 +92,10 @@ def load_latest(pathname):
     else:
         raise core.FileNotFound
 
-    return ml.iotools.load(latest), latest
+    sgd = ml.iotools.load(latest)
+    if not hasattr(sgd, 'step_i') or sgd.step_i is None:
+        sgd.step_i = latest_N
+    return sgd, latest
 
 def get_model(params):
     # TODO: Use core.get_meso_model
@@ -649,10 +652,6 @@ if __name__ == "__main__":
     shim.load_theano()
     shim.gettheano().config.compute_test_value = 'raise'
 
-    # Check if we can continue a previous run
-    resume = getattr(mgr.args, 'resume', True)
-    prev_run = get_previous_run(mgr.params, resume)
-
     #sgd, n_iterations = do_gradient_descent(mgr.params, prev_run)
 
     # Load the gradient descent class
@@ -662,6 +661,14 @@ if __name__ == "__main__":
     #shim.config.floatX = 'float64'
     pymc_model, pymc_priors, start_var, batch_size_var = \
         get_pymc_model(mgr.params.posterior, model, mgr.params.sgd.batch_size)
+          # Changes mgr.params by pruning unused parameters
+
+    # Check if we can continue a previous run
+    # TODO: Check for previous run and whether to skip altogether before
+    #       loading model.
+    resume = getattr(mgr.args, 'resume', True)
+    prev_run = get_previous_run(mgr.params, resume)
+
     if prev_run is None:
         var_subs = {prior.model_var: prior.pymc_var
                     for prior in pymc_priors.values()}
