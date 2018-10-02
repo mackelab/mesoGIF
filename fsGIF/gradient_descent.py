@@ -169,6 +169,9 @@ def get_model(params):
     return model #, prior_sampler
 
 def get_prior_params(params):
+    """
+    FIXME: Don't modify `params`. NOTE: This will invalidate old path names
+    """
     varnames = getattr(params, 'variables',
                        list(params.mask.keys()))
     varnames = list(varnames)
@@ -196,7 +199,7 @@ def get_model_vars(params, model, prune=None):
     Return the list of parameters in `model` which are defined in `params`.
     The order of the list is determined by `params.variables`.
     If `prune` is given, it should be either a list of strings or of symbolic
-    variables; only parameters whose name matches thate of one of the elements
+    variables; only parameters whose name matches that of one of the elements
     of `prune` are returned.
     """
     varnames = getattr(params, 'variables',
@@ -621,6 +624,10 @@ def get_sgd_pathname(params, iterations=None, **kwargs):
     """
     global data_dir, label_dir
 
+    # FIXME: No longer needed once `get_prior_params` is fixed
+    #        Changes mgr.params by pruning unused parameters
+    get_prior_params(params.posterior)
+
     suffix = kwargs.pop('suffix', '')
     if iterations is not None:
         assert(isinstance(iterations, int))
@@ -652,24 +659,16 @@ if __name__ == "__main__":
     shim.load_theano()
     shim.gettheano().config.compute_test_value = 'raise'
 
-    #sgd, n_iterations = do_gradient_descent(mgr.params, prev_run)
-
-    # Load the gradient descent class
-    model = get_model(mgr.params)
-
-    # Use double precision for priors. Avoids failures when sampling from tails
-    #shim.config.floatX = 'float64'
-    pymc_model, pymc_priors, start_var, batch_size_var = \
-        get_pymc_model(mgr.params.posterior, model, mgr.params.sgd.batch_size)
-          # Changes mgr.params by pruning unused parameters
-
     # Check if we can continue a previous run
-    # TODO: Check for previous run and whether to skip altogether before
-    #       loading model.
     resume = getattr(mgr.args, 'resume', True)
     prev_run = get_previous_run(mgr.params, resume)
 
     if prev_run is None:
+        # Load the gradient descent class
+        model = get_model(mgr.params)
+        pymc_model, pymc_priors, start_var, batch_size_var = \
+            get_pymc_model(mgr.params.posterior, model, mgr.params.sgd.batch_size)
+
         var_subs = {prior.model_var: prior.pymc_var
                     for prior in pymc_priors.values()}
         sgd = get_sgd(mgr.params, model, pymc_model,
