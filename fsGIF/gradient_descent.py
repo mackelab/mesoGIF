@@ -172,6 +172,7 @@ def get_prior_params(params):
     """
     FIXME: Don't modify `params`. NOTE: This will invalidate old path names
     """
+    params = copy.deepcopy(params)
     varnames = getattr(params, 'variables',
                        list(params.mask.keys()))
     varnames = list(varnames)
@@ -455,9 +456,10 @@ def get_param_hierarchy(params):
         # Initial parameter values
         init_params = copy.deepcopy(params.init_vals)
         # Dataset parameters
-        data_keys = ['data', 'input', 'model', 'mask']
-        data_params = copy.deepcopy(
-            ParameterSet({key: params.posterior[key] for key in data_keys}))
+        #data_keys = ['data', 'input', 'model', 'mask']
+        #data_params = copy.deepcopy(
+        #    ParameterSet({key: params.posterior[key] for key in data_keys}))
+        data_params = params.posterior
 
         return [data_params, sgd_params, init_params]
 
@@ -626,7 +628,7 @@ def get_sgd_pathname(params, iterations=None, **kwargs):
 
     # FIXME: No longer needed once `get_prior_params` is fixed
     #        Changes mgr.params by pruning unused parameters
-    get_prior_params(params.posterior)
+    # get_prior_params(params.posterior)
 
     suffix = kwargs.pop('suffix', '')
     if iterations is not None:
