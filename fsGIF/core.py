@@ -1274,8 +1274,10 @@ def get_pset(fit, model_params, input_params=None, seed=314):
 def get_result_pset(fit, input_params=None, seed=314):
     return get_pset(fit, fit.result, input_params=input_params, seed=seed)
 
-def get_result_activity_filename(pset, suffix=''):
-    return get_pathname(data_dir = data_dir,
+def get_result_activity_filename(pset, suffix='', datadir=None):
+    if datadir is None:
+        datadir = globals()['data_dir']
+    return get_pathname(data_dir = datadir,
                         params = pset,
                         subdir = 'activity',
                         suffix = suffix,
@@ -1293,7 +1295,7 @@ def save_result_params(pset):
     ml.parameters.params_to_lists(pset).save(pathname)
     return pathname
 
-def get_param_sim(pset, suffix='', desc="", missing_msgs=None):
+def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None):
     """
     Parameters
     ----------
@@ -1306,7 +1308,7 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None):
         Extra information to print if simulation data is missing.
         One line per list element.
     """
-    fn = get_result_activity_filename(pset, suffix=suffix)
+    fn = get_result_activity_filename(pset, suffix=suffix, datadir=datadir)
     if missing_msgs is None:
         missing_msgs = []
 
@@ -1328,7 +1330,7 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None):
     else:
         return sim
 
-def get_result_sim(fitcoll, suffix='', input_params=None, seed=314):
+def get_result_sim(fitcoll, suffix='', desc=None, input_params=None, seed=314):
     """
     Returns
     -------
@@ -1339,9 +1341,10 @@ def get_result_sim(fitcoll, suffix='', input_params=None, seed=314):
     estimates = {'posterior': 'map',
                  'loglikelihood': 'mle'}
     sgd = fitcoll.reffit.parameters.sgd
-    desc = ('{}-activity_[data]_lr-{}_batch-{}_[fit params]'
-            .format(estimates[sgd.cost], sgd.optimizer_kwargs.lr,
-                      sgd.batch_size))
+    if desc is None:
+        desc = ('{}-activity_[data]_lr-{}_batch-{}_[fit params]'
+                .format(estimates[sgd.cost], sgd.optimizer_kwargs.lr,
+                          sgd.batch_size))
     p = get_result_pset(fitcoll, input_params=input_params, seed=seed)
     return get_param_sim(
           p, suffix=suffix,
