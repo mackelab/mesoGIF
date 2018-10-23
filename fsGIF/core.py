@@ -1440,7 +1440,7 @@ def compute_spike_activity(spike_history, activity_dt=None):
 
     return Ahist
 
-def subsample(hist, target_dt, max_len = None):
+def subsample(hist, target_dt, max_len = None, aggregation='mean'):
     """
     max_len: float
         (Optional) Maximum length of data to keep. If the source data (`hist`)
@@ -1461,7 +1461,7 @@ def subsample(hist, target_dt, max_len = None):
     #    # Nothing to do
     #    return hist
 
-    newhist = anlz.subsample(hist, amount)
+    newhist = anlz.subsample(hist, amount, aggregation)
     if max_len is not None:
         Δidx = newhist.index_interval(max_len)
         if Δidx < len(newhist._tarr) - 1:
