@@ -258,7 +258,7 @@ class RunMgr:
         'spike_nbar' : "spike_nbar",
         'logL_sweep' : "likelihood",
         'sgd'        : "fits",
-        'mcmc'       : "mcmc_nosync",
+        'mcmc'       : "mcmc",
         }
     smtlabel = 'cmdline'
         # Either 'cmdline' or None. 'parameters' not currently supported
@@ -1451,17 +1451,17 @@ def subsample(hist, target_dt, max_len = None, aggregation='mean'):
     if shim.is_theano_object(hist):
         raise NotImplementedError("Subsampling only implemented for non-"
                                   "symbolic histories.")
-    amount = np.rint(target_dt / hist.dt).astype('int64')
-    amount = amount.astype(np.min_scalar_type(amount))
-    if amount == 0:
-        raise ValueError("`subsample` can only decrease sampling rate. "
-                         "history dt: {}\ntarget dt: {}"
-                         .format(hist.dt, target_dt))
+    # amount = np.rint(target_dt / hist.dt).astype('int64')
+    # amount = amount.astype(np.min_scalar_type(amount))
+    # if amount == 0:
+    #     raise ValueError("`subsample` can only decrease sampling rate. "
+    #                      "history dt: {}\ntarget dt: {}"
+    #                      .format(hist.dt, target_dt))
     #elif amount == 1:
     #    # Nothing to do
     #    return hist
 
-    newhist = anlz.subsample(hist, amount, aggregation)
+    newhist = anlz.subsample(hist, target_dt=target_dt, aggregation=aggregation)
     if max_len is not None:
         Δidx = newhist.index_interval(max_len)
         if Δidx < len(newhist._tarr) - 1:
