@@ -1278,7 +1278,7 @@ class GIF_mean_field(models.Model):
 
         # To determine stationary activity we need actual Numpy values, not Theano variables
         params = type(model.params)(
-            **{ name: getattr(model.params, name).get_value()
+            **{ name: shim.eval(getattr(model.params, name))
                 for name in model.params._fields } )
             # Create a new parameter object, of same type as the model parameters,
             # but with values rather than Theano variables
