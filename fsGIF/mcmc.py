@@ -332,19 +332,28 @@ if __name__ == "__main__":
     # TODO: mgr.parser.add_argument('--resume' ...
 
     mgr.load_parameters()
-    if 'floatX' in mgr.params:
-        shim.config.floatX = mgr.params.floatX
+    mcmc_filename = mgr.get_pathname(label='')
 
-    if ml.theano.using_gpu():
-        logger.info("Theano using GPU")
+    try:
+        ml.iotools.load(mcmc_filename, format='dill')
+    except FileNotFoundError:
+        # Get pathname with run label
+        if mgr.args.debug:
+            mcmc_filename = "mcmc_debug.dill"
+        else:
+            mcmc_filename = mgr.get_pathname(label=None)
+
+        if 'floatX' in mgr.params:
+            shim.config.floatX = mgr.params.floatX
+
+        if ml.theano.using_gpu():
+            logger.info("Theano using GPU")
+        else:
+            logger.info("Theano using only CPU")
+
+        pymc_model, priors = get_pymc_model_new(mgr.params.posterior)
+        trace = run_mcmc(mgr, pymc_model, priors)
+
+        ml.iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
     else:
-        logger.info("Theano using only CPU")
-
-    pymc_model, priors = get_pymc_model_new(mgr.params.posterior)
-    trace = run_mcmc(mgr, pymc_model, priors)
-
-    if mgr.args.debug:
-        mcmc_filename = "mcmc_debug.dill"
-    else:
-        mcmc_filename = mgr.get_pathname(label=None)
-    ml.iotools.save(mcmc_filename, export_multitrace(trace), format='dill')
+        logger.info("An MCMC with matching parameters was found. Skipping...")
