@@ -14,6 +14,7 @@ import copy
 import operator
 
 import theano_shim as shim
+import mackelab.utils as utils
 import sinn
 import sinn.config as config
 from sinn.histories import Series, Spiketrain
@@ -896,9 +897,9 @@ class GIF_mean_field(models.Model):
         # HACK For propagating gradients without scan
         #      Order must be consistent with return value of symbolic_update
         # TODO: Use State rather than LatentState, so we don't need to add the A manually
-        return (getattr(self, varname) for varname in self.LatentState._fields)
-
-
+        return utils.FixedGenerator(
+            (getattr(self, varname) for varname in self.LatentState._fields),
+            len(self.LatentState._fields) )
 
     def given_A(self):
         """Run this function when A is given data. It reverses the dependency
