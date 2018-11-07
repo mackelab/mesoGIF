@@ -11,8 +11,8 @@ logger = core.logger
 ############################
 # Model import
 from fsGIF import fsgif_model as gif
-data_dir = "data"
-label_dir = "run_dump"
+#data_dir = "data"
+#label_dir = "run_dump"
 ############################
 
 def get_model(params):
@@ -22,11 +22,11 @@ def get_model(params):
     rndstream = core.get_random_stream(seed)
 
     input_filename = core.add_extension(
-        core.get_pathname(data_dir=data_dir,
+        core.get_pathname(data_dir=core.data_dir,
                           params=params.input.params,
                           subdir=params.input.dir,
                           suffix=params.input.name,
-                          label_dir=label_dir,
+                          label_dir=core.label_dir,
                           label=''))
     Ihist = iotools.load(input_filename)
     if isinstance(Ihist, np.lib.npyio.NpzFile):
