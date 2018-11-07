@@ -1295,7 +1295,8 @@ def save_result_params(pset):
     ml.parameters.params_to_lists(pset).save(pathname)
     return pathname
 
-def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None):
+def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None,
+                  model='activity'):
     """
     Parameters
     ----------
@@ -1318,9 +1319,14 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None):
         print(e); print()
         # TODO: Use variable for save location
         params_file = save_result_params(pset)
+        if model == 'activity':
+            script = 'fsGIF/fsGIF/generate_activity.py'
+        else:
+            assert(model == 'spikes')
+            script = 'fsGIF/fsGIF/generate_spikes.py'
         print("Run simulation first:")
-        print('smt run -m fsGIF/fsGIF/generate_activity.py '
-              '--reason "{}" {}'.format(desc, params_file))
+        print('smt run -m {} --reason "{}" {}'
+              .format(script, desc, params_file))
         if missing_msgs is not None:
             if isinstance(missing_msgs, str):
                 missing_msgs = [missing_msgs]
