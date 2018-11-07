@@ -209,7 +209,7 @@ class GIF_spiking(models.Model):
         self.t_hat = Series(self.RI_syn, 't_hat')
             # time since last spike
 
-        self.statehists = [ getattr(self, varname) for varname in self.State._fields ]
+        # self.statehists = [ getattr(self, varname) for varname in self.State._fields ]
         # Kernels
         shape2d = (self.Npops, self.Npops)
         self.ε = Kernel_ε('ε', self.params, shape=shape2d)
@@ -750,11 +750,6 @@ class GIF_mean_field(models.Model):
         self.Z = Series(self.X, 'Z')
         self.W = Series(self.X, 'W')
 
-        # HACK For propagating gradients without scan
-        #      Order must be consistent with return value of symbolic_update
-        # TODO: Use State rather than LatentState, so we don't need to add the A manually
-        self.statehists = [ getattr(self, varname) for varname in self.LatentState._fields ]
-
         self.init_kernels()
 
         # Initialize the variables
@@ -895,6 +890,14 @@ class GIF_mean_field(models.Model):
         #     self._advance_fn = shim.gettheano().function([tidx], [], updates=shim.get_updates())
         #     self.theano_reset()
         #     logger.info("Done.")
+
+    @property
+    def statehists(self):
+        # HACK For propagating gradients without scan
+        #      Order must be consistent with return value of symbolic_update
+        # TODO: Use State rather than LatentState, so we don't need to add the A manually
+        return (getattr(self, varname) for varname in self.LatentState._fields)
+
 
 
     def given_A(self):
