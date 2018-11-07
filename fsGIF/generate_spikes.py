@@ -137,27 +137,30 @@ if __name__ == "__main__":
             gif.homo = False
             break
 
-    generate_data = False
-    try:
-        # Try to load data to see if it's already been calculated
-        shist = ml.iotools.load(spike_filename)
-    except (FileNotFoundError, core.FileNotFound):
-        # FIXME: ml.iotools.load does not raise `core.FileNotFound`
+    if mgr.recalculate:
         generate_data = True
-    except core.FileRenamed:
-        # FIXME Will never happen: ml.iotools.load does not raise FileRenamed
-        # The --recalculate flag was passed and the original data file renamed
-        # Do the same with the associated activity file
-        generate_data = True
-        activity_path = mgr.find_path(spike_activity_filename)
-        if activity_path is not None:
-            mgr.rename_to_free_file(activity_path)
-                # Warning: If there are missing activity traces, the rename could
-                #   suffix the spikes and activity with a different number, as in
-                #   both cases the first free suffix is used
-                # Warning #2: If the data filename is free, but not the filename
-                #   of the derived data (e.g. because only the first was renamed),
-                #   the derived data is NOT renamed
+    else:
+        generate_data = False
+        try:
+            # Try to load data to see if it's already been calculated
+            shist = ml.iotools.load(spike_filename)
+        except (FileNotFoundError, core.FileNotFound):
+            # FIXME: ml.iotools.load does not raise `core.FileNotFound`
+            generate_data = True
+        # except core.FileRenamed:
+        #     # FIXME Will never happen: ml.iotools.load does not raise FileRenamed
+        #     # The --recalculate flag was passed and the original data file renamed
+        #     # Do the same with the associated activity file
+        #     generate_data = True
+        #     activity_path = mgr.find_path(spike_activity_filename)
+        #     if activity_path is not None:
+        #         mgr.rename_to_free_file(activity_path)
+        #             # Warning: If there are missing activity traces, the rename could
+        #             #   suffix the spikes and activity with a different number, as in
+        #             #   both cases the first free suffix is used
+        #             # Warning #2: If the data filename is free, but not the filename
+        #             #   of the derived data (e.g. because only the first was renamed),
+        #             #   the derived data is NOT renamed
     if generate_data:
         # Get new filenames with the run label
         if mgr.args.debug:
