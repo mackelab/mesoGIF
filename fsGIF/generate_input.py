@@ -4,6 +4,7 @@ import inspect
 import simpleeval
 import ast
 import operator as op
+import itertools
 
 import mackelab as ml
 import mackelab.iotools
@@ -14,13 +15,18 @@ import sinn.history_functions
 import sinn.models
 
 from fsGIF import core
+import fsGIF.history_functions
 logger = core.logger
 
 class ParameterError(ValueError):
     pass
 
+possible_hist_types = itertools.chain(
+    inspect.getmembers(sinn.history_functions),
+    inspect.getmembers(fsGIF.history_functions))
 hist_types = { histname: histtype
-               for histname, histtype in inspect.getmembers(sinn.history_functions)
+               for histname, histtype in
+               possible_hist_types
                if inspect.isclass(histtype)
                  and issubclass(histtype, sinn.history_functions.SeriesFunction)
                  and histtype is not sinn.history_functions.SeriesFunction }
