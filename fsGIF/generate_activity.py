@@ -15,23 +15,24 @@ from fsGIF import fsgif_model as gif
 #label_dir = "run_dump"
 ############################
 
-def get_model(params):
+def get_model(params, Ihist=None):
     # TODO: Use core.get_meso_model
 
     seed = params.seed
     rndstream = core.get_random_stream(seed)
 
-    input_filename = core.add_extension(
-        core.get_pathname(data_dir=core.data_dir,
-                          params=params.input.params,
-                          subdir=params.input.dir,
-                          suffix=params.input.name,
-                          label_dir=core.label_dir,
-                          label=''))
-    Ihist = iotools.load(input_filename)
-    if isinstance(Ihist, np.lib.npyio.NpzFile):
-        # Support older data files
-        Ihist = Series.from_repr_np(Ihist)
+    if Ihist is None:
+        input_filename = core.add_extension(
+            core.get_pathname(data_dir=core.data_dir,
+                              params=params.input.params,
+                              subdir=params.input.dir,
+                              suffix=params.input.name,
+                              label_dir=core.label_dir,
+                              label=''))
+        Ihist = iotools.load(input_filename)
+        if isinstance(Ihist, np.lib.npyio.NpzFile):
+            # Support older data files
+            Ihist = Series.from_repr_np(Ihist)
 
     Ihist_subsampled = core.subsample(Ihist, params.dt,
                                       max_len = int(params.tn / params.dt))
