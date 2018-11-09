@@ -1275,14 +1275,29 @@ def get_result_pset(fit, input_params=None, seed=314):
     return get_pset(fit, fit.result, input_params=input_params, seed=seed)
 
 def get_result_activity_filename(pset, suffix='', datadir=None):
-    if datadir is None:
-        datadir = globals()['data_dir']
-    return get_pathname(data_dir = datadir,
-                        params = pset,
-                        subdir = 'activity',
-                        suffix = suffix,
-                        label_dir = 'run_dump',
-                        label = '')
+    return get_sim_filename(pset, suffix=suffix, datatir=datadir,
+                            subdir='activity')
+
+def get_sim_filename(pset, suffix='', datadir=None, subdir='activity'):
+    if 'data_dir' in pset:
+        return get_pathname(data_dir = pset.data_dir,
+                            params = pset.params,
+                            subdir = pset.subdir,
+                            suffix = pset.suffix,
+                            label_dir = 'run_dump',
+                            label = '')
+    else:
+        if datadir is None:
+            datadir = globals()['data_dir']
+        pset = ParameterSet({'data_dir': datadir,
+                             'params': pset,
+                             'subdir': subdir,
+                             'suffix': suffix,
+                             'label_dir': 'run_dump',
+                             'label': ''})
+        return get_sim_filename(pset)
+
+
 
 def get_mle_params_file(pset):
     filename = ml.parameters.get_filename(pset)[:8]
@@ -1307,9 +1322,11 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None,
         Simulation description. Used as argument to `--reason`
     missing_messages: iterable of strings
         Extra information to print if simulation data is missing.
-        One line per list element.
+        Each list element is printed on a separate line.
     """
-    fn = get_result_activity_filename(pset, suffix=suffix, datadir=datadir)
+    assert(model in ('activity', 'spikes'))
+    fn = get_sim_filename(pset, suffix=suffix, datadir=datadir,
+                                      subdir=model)
     if missing_msgs is None:
         missing_msgs = []
 
