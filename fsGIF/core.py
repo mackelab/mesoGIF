@@ -1214,10 +1214,18 @@ def update_params(baseparams, *newparams, mask=None):
             baseparams[key] = baseparam.astype(restype)
             if pmask.ndim > baseparam.ndim:
                 pmask = pmask.reshape(baseparam.shape)
-            #paramset[key] = val.reshape(baseparams[key].shape)
-            baseparam = baseparams[key][pmask]   # Need this intermediate var
-            baseparam.flat = val.flat            # otherwise assignment is
-            baseparams[key][pmask] = baseparam   # ignored
+            n_replace_vals = baseparams[key][pmask].size
+            flatmask = pmask.flatten()
+            if n_replace_vals == 0:
+                continue
+            elif n_replace_vals == val.size:
+                baseparams[key].flat[flatmask] = val.flat
+            else:
+                # Index into a flattened array because `val` may be different
+                # shape (e.g. results from fits are always flat)
+                maskedval = val.flat[flatmask]
+                assert(n_replace_vals == maskedval.size)
+                baseparams[key].flat[flatmask] = maskedval
             baseparams[key] = baseparams[key].reshape(shape)
 
         #baseparams.update(paramset)
@@ -1257,6 +1265,7 @@ def get_pset(fit, model_params, input_params=None, seed=314):
 
     p = ParameterSet({
          'model': fit.parameters.posterior.model.params,
+             # Used just as defaults: `model_params` substituted below
          'input': input_params,
          'seed': seed,
          'initializer': fit.parameters.posterior.model.initializer,
@@ -1316,6 +1325,8 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None,
     Parameters
     ----------
     pset: ParameterSet
+        Same format as would be provided to `generate_activity` or
+        `generate_spikes.`
     suffix: str
         Data filename suffix
     desc: str
