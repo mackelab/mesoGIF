@@ -59,7 +59,7 @@ HOME = "/home/alex/Recherche/macke_lab"
 DATADIR = "/home/alex/Recherche/data/mackelab/sim/fsGIF/"
 DUMPDIR = os.path.join(DATADIR, "run_dump")
 
-recordstore = smttk.RecordStore(os.path.join(HOME, "run/fsGIF/.smt/records"))
+recordstore = smttk.RecordStore(os.path.join(HOME, "containers/fsGIF/run/.smt/records"))
 #records = smttk.get_records(recordstore, 'fsGIF')
 """
 

@@ -746,6 +746,30 @@ def get_trace_params(traces, posterior_desc, displaynames=None, varnames=None,
 
     return flat_params
 
+def load(input_pset, label='', data_dir=None, label_dir=None):
+    """
+    Load a data file specified by a ParameterSet in the InputPSet format.
+
+    Parameters
+    ----------
+    input_pset: ParameterSet (InputPSet)
+        An InputPSet can be any object (ParameterSet, class, named tuple)
+        with the following attributes:
+        + dir: directory (relative to `data_dir`) in which the file was stored
+        + type: Data type, e.g. `Series` (not currently used).
+        + params: parameter set that was used to generate the hash for the
+               data file
+        + name: suffix appended to the filename hash
+    """
+    if data_dir is None: data_dir = globals()['data_dir']
+    fn = get_pathname(data_dir = data_dir,
+                      params = input_pset.params,
+                      suffix = input_pset.name,
+                      subdir = input_pset.dir,
+                      label_dir = label_dir,
+                      label = label)
+    return ml.iotools.load(fn)
+
 def _split_number(s):
     """
     Split a string on the first character which is a number.
