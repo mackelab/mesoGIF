@@ -1214,6 +1214,7 @@ def update_params(baseparams, *newparams, mask=None):
             baseparams[key] = baseparam.astype(restype)
             if pmask.ndim > baseparam.ndim:
                 pmask = pmask.reshape(baseparam.shape)
+            pmask = np.broadcast_to(pmask, baseparam.shape)
             n_replace_vals = baseparams[key][pmask].size
             flatmask = pmask.flatten()
             if n_replace_vals == 0:
