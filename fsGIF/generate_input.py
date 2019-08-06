@@ -43,7 +43,7 @@ def generate_input(params):
         if histname in hists:
             raise ParameterError("Parameter '{}' appears twice in the list of inputs."
                                  .format(histname))
-        _hist_params = getattr(params, histname)
+        _hist_params = getattr(params, histname).copy()
 
         if hasattr(_hist_params, 'function') == hasattr(_hist_params, 'model'):
             raise SyntaxError("History description must have either a "

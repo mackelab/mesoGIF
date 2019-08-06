@@ -179,8 +179,9 @@ class GIF_spiking(models.Model):
         models.Model.output_rng(self.s, self.rndstream)
 
         super().__init__(params,
-                        public_histories=(spike_history, input_history),
-                        reference_history=self.s)
+                         t0=self.s.t0, tn=self.s.tn, dt=self.s.dt,
+                         public_histories=(spike_history, input_history),
+                         reference_history=self.s)
         # NOTE: Do not use `params` beyond here. Always use self.params.
         self.params = self.params._replace(
             **{name: self.s.PopTerm(getattr(self.params, name)) for name in params._fields})
@@ -665,8 +666,9 @@ class GIF_mean_field(models.Model):
 
         # Run the base class initialization
         super().__init__(params,
-                        public_histories=(activity_history, input_history),
-                        reference_history=self.nbar)
+                         t0=self.nbar.t0, tn=self.nbar.tn, dt=self.nbar.dt,
+                         public_histories=(self.A, self.I_ext),
+                         reference_history=self.nbar)
         # NOTE: Do not use `params` beyond here. Always use self.params.
 
         N = self.params.N.get_value()

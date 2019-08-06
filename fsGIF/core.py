@@ -1362,7 +1362,7 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None,
     """
     assert(model in ('activity', 'spikes'))
     fn = get_sim_filename(pset, suffix=suffix, datadir=datadir,
-                                      subdir=model)
+                          subdir=model)
     if missing_msgs is None:
         missing_msgs = []
 
@@ -1373,11 +1373,11 @@ def get_param_sim(pset, suffix='', desc="", missing_msgs=None, datadir=None,
         # TODO: Use variable for save location
         params_file = save_result_params(pset)
         if model == 'activity':
-            script = 'fsGIF/fsGIF/generate_activity.py'
+            script = '../code/fsGIF/generate_activity.py'
         else:
             assert(model == 'spikes')
-            script = 'fsGIF/fsGIF/generate_spikes.py'
-        print("Run simulation first:")
+            script = '../code/fsGIF/generate_spikes.py'
+        print("Run simulation first: (from container's `run` directory)")
         print('smt run -m {} --reason "{}" {}'
               .format(script, desc, params_file))
         if missing_msgs is not None:

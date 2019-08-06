@@ -4,3 +4,5 @@ params
 *.npr
 theano_compile
 *.params
+profile.sh
+tests/out
