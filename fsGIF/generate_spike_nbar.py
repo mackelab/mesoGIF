@@ -3,8 +3,8 @@ import numpy as np
 #from tqdm import tqdm
 import multiprocessing as mp
 
-import mackelab as ml
-import mackelab.iotools
+import mackelab_toolbox as ml
+import mackelab_toolbox.iotools
 
 import theano_shim as shim
 from sinn.histories import Series, Spiketrain

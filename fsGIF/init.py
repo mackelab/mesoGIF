@@ -34,13 +34,14 @@ from importlib import reload
 
 import theano_shim as shim
 
-import mackelab as ml
-import mackelab.smttk as smttk
-import mackelab.iotools
-import mackelab.pymc3
-import mackelab.parameters
-import mackelab.plot
-ml.parameters.Transform.namespaces['shim'] = shim
+import mackelab_toolbox as ml
+import mackelab_toolbox.smttk as smttk
+import mackelab_toolbox.iotools
+import mackelab_toolbox.pymc3
+import mackelab_toolbox.parameters
+import mackelab_toolbox.transform
+import mackelab_toolbox.plot
+ml.transform.Transform.namespaces['shim'] = shim
 
 import sinn
 import sinn.histories as histories

@@ -1,11 +1,11 @@
 import os.path
 import numpy as np
 import pymc3 as pymc
-import mackelab as ml
-from mackelab.pymc3 import PyMCPrior, export_multitrace
-from mackelab.parameters import Transform
-import mackelab.parameters
-import mackelab.theano
+import mackelab_toolbox as ml
+from mackelab_toolbox.pymc3 import PyMCPrior, export_multitrace
+from mackelab_toolbox.parameters import Transform
+import mackelab_toolbox.parameters
+import mackelab_toolbox.theano
 
 from parameters import ParameterSet
 import theano_shim as shim

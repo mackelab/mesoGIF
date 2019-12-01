@@ -12,11 +12,6 @@ Then install the package by navigating to this directory and running
     pip install .
 (Add the `-e` option to install in develop mode, which allows modifying the code without requiring a reinstall every time.)
 
-[Broken! Don't do this] If you want to run scripts through Sumatra, it's best to add the fsGIF parameter type first:
-    smt configure --add-plugin=fsGIF.paramtype
-
-Most scripts will work without this step, but some require it (e.g. `generate-mle-activity.py`).
-
 # Running
 
 

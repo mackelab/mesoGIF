@@ -19,11 +19,11 @@ import collections
 from collections import namedtuple, OrderedDict, Iterable, deque
 import pymc3 as pymc
 
-import mackelab as ml
-import mackelab.iotools
-import mackelab.parameters
-import mackelab.tqdm
-import mackelab.utils
+import mackelab_toolbox as ml
+import mackelab_toolbox.iotools
+import mackelab_toolbox.parameters
+import mackelab_toolbox.tqdm
+import mackelab_toolbox.utils
 import theano_shim as shim
 import sinn
 import sinn.histories as histories

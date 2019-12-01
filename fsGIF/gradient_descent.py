@@ -11,10 +11,10 @@ import sinn
 import sinn.histories as histories
 import sinn.optimize.gradient_descent as gd
 from sinn.histories import Series, Spiketrain
-import mackelab as ml
-import mackelab.iotools
-import mackelab.parameters
-import mackelab.pymc3
+import mackelab_toolbox as ml
+import mackelab_toolbox.iotools
+import mackelab_toolbox.parameters
+import mackelab_toolbox.pymc3
 
 ml.parameters.Transform.namespaces.update({'shim': shim})
 

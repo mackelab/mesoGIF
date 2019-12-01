@@ -3,9 +3,9 @@ import numpy as np
 from tqdm import tqdm
 
 import theano_shim as shim
-import mackelab as ml
-import mackelab.parameters
-import mackelab.iotools as iotools
+import mackelab_toolbox as ml
+import mackelab_toolbox.parameters
+import mackelab_toolbox.iotools as iotools
 import sinn
 from sinn.histories import Series, Spiketrain
 import sinn.analyze as anlz

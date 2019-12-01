@@ -6,8 +6,8 @@ import ast
 import operator as op
 import itertools
 
-import mackelab as ml
-import mackelab.iotools
+import mackelab_toolbox as ml
+import mackelab_toolbox.iotools
 
 import theano_shim as shim
 from sinn.histories import Series

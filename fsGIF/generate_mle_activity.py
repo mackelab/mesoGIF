@@ -10,10 +10,10 @@ import theano_shim as shim
 from sinn.histories import Series, Spiketrain
 from sinn.optimize.gradient_descent import FitCollection
 
-import mackelab as ml
-import mackelab.iotools as iotools
-import mackelab.parameters
-import mackelab.utils
+import mackelab_toolbox as ml
+import mackelab_toolbox.iotools as iotools
+import mackelab_toolbox.parameters
+import mackelab_toolbox.utils
 
 from fsGIF import core
 from fsGIF.core import update_params

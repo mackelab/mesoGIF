@@ -14,7 +14,7 @@ import copy
 import operator
 
 import theano_shim as shim
-import mackelab.utils as utils
+import mackelab_toolbox.utils as utils
 import sinn
 import sinn.config as config
 from sinn.histories import Series, Spiketrain
