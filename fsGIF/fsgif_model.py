@@ -1193,10 +1193,12 @@ class GIF_mean_field(models.Model):
         memory_time = max(kernel.memory_time for kernel in θ)
         dt = reference_hist.dt
 
+        shape = (reference_hist.npops,) if homo else reference_hist.shape
         θ_dis = Series(reference_hist, 'θ_dis',
                        time_array = np.arange(dt, memory_time+dt, dt),
                        #t0 = dt,
                        #tn = memory_time+reference_hist.dt,
+                       shape = shape,
                        iterative = False,
                        dtype=shim.config.floatX)
             # Starts at dt because memory buffer does not include current time
