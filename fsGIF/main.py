@@ -5,7 +5,7 @@ Created Mon May 29 2017
 author: Alexandre René
 """
 
-from core import *
+from .core import *
 
 import sinn
 import sinn.histories as histories
@@ -18,7 +18,7 @@ from sinn.analyze.heatmap import HeatMap
 
 ############################
 # Model import
-import fsgif_model as gif
+import fsGIF.fsgif_model as gif
 ############################
 
 ################################
