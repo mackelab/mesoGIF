@@ -439,7 +439,7 @@ class GIF_spiking(models.Model):
                              "dimensions of 1d and 2d parameters."
                              .format(param.name, param.ndim))
 
-    def loglikelihood(self, start, batch_size):
+    def loglikelihood(self, start, batch_size, avg=False):
         # >>>>>>>>>>>>>> WARNING: Untested, incomplete <<<<<<<<<<<<<
 
         #######################
@@ -451,20 +451,21 @@ class GIF_spiking(models.Model):
         #####################
 
         startidx = self.get_t_idx(start)
+        batch_size = self.index_interval(batch_size)
         stopidx = startidx + batch_size
         N = self.params.N
 
         def logLstep(tidx, cum_logL):
             # TODO: Don't use private _data variable
             p = sinn.clip_probabilities(self.λ[tidx]*self.s.dt)
-            s = shim.cast(self.s._data.tocsr()[tidx+self.s.t0idx], self.s.idx_dtype)
+            s = shim.cast(self.s._data.tocsr()[tidx+self.s.t0idx], self.s.dtype)
 
             # L = s*n - (1-s)*(1-p)
             cum_logL += ( s*p - (1-p) + s*(1-p) ).sum()
 
             return [cum_logL], shim.get_updates()
 
-        if shim.is_theano_object([self.nbar, self.params, self.n]):
+        if shim.is_theano_object([self.s, self.params]):
             raise NotImplementedError
 
             logger.info("Producing the likelihood graph.")
@@ -484,7 +485,11 @@ class GIF_spiking(models.Model):
 
             logger.info("Likelihood graph complete")
 
-            return logL[-1], upds
+            result = logL[-1]
+            if avg:
+                result /= batch_size
+
+            return result, upds
         else:
             # TODO: Remove this branch once shim.scan is implemented
             logL = 0
@@ -492,7 +497,10 @@ class GIF_spiking(models.Model):
                 logL = logLstep(t, logL)[0][0]
             upds = shim.get_updates()
 
-            return logL, upd
+            if avg:
+                logL /= batch_size
+
+            return logL, upds
 
     # FIXME: Before replacing with Model's `advance`, need to remove HACKs
     def advance(self, stop):
