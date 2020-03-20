@@ -1,0 +1,53 @@
+-e git+git@github.com:alcrene/parameters.git@bdfbedf676f7bbd28a8f575db1309f2cdf26a23f#egg=parameters
+#-e git+ssh://git@github.com/alcrene/pymc3.git@41217e9ae2669ba0ce49e938b6d84d0fad613ebe#egg=pymc3
+-e git+git@github.com:mackelab/fsGIF.git@1d0d1c4356e43c6b4120509b82e643ebd5cffec5#egg=finite_size_GIF
+-e git+git@github.com:mackelab/mackelab.git@79d57024e4c21af447dfacde0db9184c944434a8#egg=mackelab
+-e git+git@github.com:mackelab/sinn.git@f154c08eb7dc4ec446a5d8460cee9bbc4978c21d#egg=sinn
+-e git+git@github.com:alcrene/sumatra.git@83eb58caa1c19f369ae430cfe63a1682bb59db11#egg=Sumatra
+-e git+git@github.com:mackelab/theano_shim.git@f5d20a4f6b2ad8d882b484a898b8ea47a5ff990f#egg=theano_shim
+pymc3==3.5
+
+# Jupyter stack unpinned because having different versions installed seems to cause problems
+ipykernel
+ipython
+ipywidgets
+jupyter
+jupyterlab
+jupyter-nbextensions-configurator
+qtconsole
+terminado
+tornado
+
+AttrDict==2.0.1
+NotebookScripter==6.0.0
+click==6.7
+cycler==0.10.0
+dill==0.2.8.2
+Django==1.8.19
+django-tagging==0.4.6
+entrypoints==0.2.3
+#GitPython==2.1.11
+GitPython==3.1.0
+graphviz==0.10.1
+h5py==2.8.0
+html5lib==1.0.1
+Jinja2==2.10
+jsonpickle==1.0
+matplotlib==2.2.2
+mpmath==1.1.0
+numpy==1.15.4
+odictliteral==1.0.0
+pandas==0.23.4
+#psycopg2==2.8.2
+pydot-ng==2.0.0
+pyparsing==2.2.0
+PyPDF2==1.26.0
+pyperclip==1.7.0
+PyYAML==3.13
+scipy==1.1.0
+seaborn==0.10.0
+simpleeval==0.9.5
+simplegeneric==0.8.1
+sip==4.19.8
+six==1.11.0
+tqdm==4.24.0

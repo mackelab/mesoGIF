@@ -1,0 +1,50 @@
+-e git+ssh://git@github.com/alcrene/parameters.git@335191f81f39cf16190eb738d51b0bd117223dc3#egg=parameters
+#-e git+ssh://git@github.com/alcrene/pymc3.git@41217e9ae2669ba0ce49e938b6d84d0fad613ebe#egg=pymc3
+-e git+ssh://git@github.com/mackelab/fsGIF.git@b417b9a65b126017c4227b6ef5d911005707b3ee#egg=finite_size_GIF
+-e git+ssh://git@github.com/mackelab/mackelab.git@c1df2a2b729877738b7ab41fbc8a3cb4fecbbf62#egg=mackelab
+-e git+ssh://git@github.com/mackelab/sinn.git@30a9751a1152ec62254887a591f4e8f5a81e9439#egg=sinn
+-e git+ssh://git@github.com/alcrene/sumatra.git@83eb58caa1c19f369ae430cfe63a1682bb59db11#egg=Sumatra
+-e git+ssh://git@github.com/mackelab/theano_shim.git@843562ff4d6961c3dd49fc56d5c0c845f4ceb781#egg=theano_shim
+pymc3==3.5
+
+click==6.7
+cycler==0.10.0
+dill==0.2.8.2
+Django==1.8.19
+django-tagging==0.4.6
+entrypoints==0.2.3
+#GitPython==2.1.11
+GitPython==3.0.8
+gitdb==0.6.4
+graphviz==0.10.1
+h5py==2.8.0
+html5lib==1.0.1
+ipykernel==4.8.2
+ipython==7.2.0
+ipywidgets==7.4.2
+Jinja2==2.10
+joblib==0.12.2
+jsonpickle==1.0
+jupyter==1.0.0
+matplotlib==2.2.2
+mpmath==1.1.0
+numpy==1.14.0
+odictliteral==1.0.0
+pandas==0.23.4
+psycopg2==2.7.5
+pydot-ng==2.0.0
+pyparsing==2.2.0
+pyperclip==1.7.0
+PyQt5==5.12
+PyQt5-sip==4.19.14
+PyYAML==3.13
+qtconsole==4.4.3
+scipy==1.1.0
+simpleeval==0.9.5
+simplegeneric==0.8.1
+sip==4.19.8
+six==1.11.0
+sympy==1.3
+terminado==0.8.1
+tornado==4.5.3
+tqdm==4.24.0
