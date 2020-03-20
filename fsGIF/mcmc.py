@@ -3,7 +3,7 @@ import numpy as np
 import pymc3 as pymc
 import mackelab_toolbox as ml
 from mackelab_toolbox.pymc3 import PyMCPrior, export_multitrace
-from mackelab_toolbox.parameters import Transform
+from mackelab_toolbox.transform import Transform
 import mackelab_toolbox.parameters
 import mackelab_toolbox.theano
 

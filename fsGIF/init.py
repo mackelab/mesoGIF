@@ -66,3 +66,4 @@ recordstore = smttk.RecordStore(os.path.join(HOME, "containers/fsGIF/run/.smt/re
 
 exec(init_code)
 print(init_code)
+del init_code

@@ -16,7 +16,7 @@ import mackelab_toolbox.iotools
 import mackelab_toolbox.parameters
 import mackelab_toolbox.pymc3
 
-ml.parameters.Transform.namespaces.update({'shim': shim})
+ml.transform.Transform.namespaces.update({'shim': shim})
 
 from fsGIF import core
 #from fsGIF.mcmc import get_pymc_model_new as get_pymc_model  # FIXME: Move function to avoid sibling import
