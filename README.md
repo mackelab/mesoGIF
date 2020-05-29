@@ -4,7 +4,7 @@
 
 This repository archives the code used to obtain the results in [René et al., 2020](https://arxiv.org/abs/1910.01618). To reproduce the software environment used for that publication (warts and all), see the folders under [containers](./containers).
 
-### Deprecation notice
+### Note
 
 This code was built on a previous experimental version of our [*sinn* inference library](https://github.com/mackelab/sinn). *Sinn* has since seen many, backwards-incompatible usability enhancements, and we highly recommend using the newest version. Unfortunately this means that our implementation of the *mesoGIF* model is currently locked to the old *sinn* version until we find the time to update it.
 
